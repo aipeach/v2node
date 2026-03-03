@@ -10,10 +10,10 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.19.0
-	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/xtls/xray-core v1.260206.0
 	golang.org/x/sys v0.41.0
 	google.golang.org/protobuf v1.36.11
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -190,7 +190,6 @@ require (
 	github.com/vinyldns/go-vinyldns v0.9.16 // indirect
 	github.com/vishvananda/netlink v1.3.1 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
-	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.216 // indirect
 	github.com/vultr/govultr/v3 v3.21.1 // indirect
 	github.com/xtls/reality v0.0.0-20251014195629-e4eec4520535 // indirect
@@ -226,9 +225,8 @@ require (
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/ns1/ns1-go.v2 v2.14.4 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gvisor.dev/gvisor v0.0.0-20260122175437-89a5d21be8f0 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/xtls/xray-core v1.260206.0 => github.com/wyx2685/xray-core v0.0.0-20260301200735-965d62dfa5de
+replace github.com/xtls/xray-core v1.260206.0 => github.com/aipeach/Xray-core v0.0.0-20260303114111-a2c6fc6c7b3e

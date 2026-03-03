@@ -23,5 +23,8 @@ func (v *V2Core) DelNode(tag string) error {
 	if err != nil {
 		return fmt.Errorf("remove in error: %s", err)
 	}
+	if v.dispatcher != nil {
+		v.dispatcher.AuditCounter.Delete(tag)
+	}
 	return nil
 }

@@ -1,6 +1,8 @@
 package node
 
 import (
+	"strconv"
+
 	log "github.com/sirupsen/logrus"
 	panel "github.com/wyx2685/v2node/api/v2board"
 )
@@ -12,7 +14,26 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		reportmin = c.info.Common.BaseConfig.NodeReportMinTraffic
 		devicemin = c.info.Common.BaseConfig.DeviceOnlineMinTraffic
 	}
-	userTraffic, _ := c.server.GetUserTrafficSlice(c.tag, reportmin)
+	if c.server != nil && c.server.Config != nil {
+		if c.server.Config.SubmitTrafficMinTraffic >= 0 {
+			reportmin = c.server.Config.SubmitTrafficMinTraffic
+		}
+		if c.server.Config.SubmitAliveIPMinTraffic >= 0 {
+			devicemin = c.server.Config.SubmitAliveIPMinTraffic
+		}
+	}
+	allTraffic, _ := c.server.GetUserTrafficSlice(c.tag, 0)
+	var userTraffic []panel.UserTraffic
+	if reportmin <= 0 {
+		userTraffic = allTraffic
+	} else {
+		for _, traffic := range allTraffic {
+			total := traffic.Upload + traffic.Download
+			if total >= int64(reportmin*1000) {
+				userTraffic = append(userTraffic, traffic)
+			}
+		}
+	}
 	if len(userTraffic) > 0 {
 		err = c.apiClient.ReportUserTraffic(userTraffic)
 		if err != nil {
@@ -30,15 +51,12 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		log.Print(err)
 	} else if len(*onlineDevice) > 0 {
 		var result []panel.OnlineUser
-		var nocountUID = make(map[int]struct{})
-		for _, traffic := range userTraffic {
-			total := traffic.Upload + traffic.Download
-			if total < int64(devicemin*1000) {
-				nocountUID[traffic.UID] = struct{}{}
-			}
+		uidTraffic := make(map[int]int64, len(allTraffic))
+		for _, traffic := range allTraffic {
+			uidTraffic[traffic.UID] += traffic.Upload + traffic.Download
 		}
 		for _, online := range *onlineDevice {
-			if _, ok := nocountUID[online.UID]; !ok {
+			if uidTraffic[online.UID] >= int64(devicemin*1000) {
 				result = append(result, online)
 			}
 		}
@@ -58,30 +76,46 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}
 	}
 
+	if detectLogs, reportErr := c.server.GetAndResetUserDetectLogs(c.tag); reportErr != nil {
+		log.WithFields(log.Fields{
+			"tag": c.tag,
+			"err": reportErr,
+		}).Info("Collect detect logs failed")
+	} else if len(detectLogs) > 0 {
+		if reportErr = c.apiClient.ReportUserDetectLogs(detectLogs); reportErr != nil {
+			log.WithFields(log.Fields{
+				"tag": c.tag,
+				"err": reportErr,
+			}).Info("Report detect logs failed")
+		} else {
+			log.WithField("tag", c.tag).Infof("Report %d detect logs", len(detectLogs))
+		}
+	}
+
+	allTraffic = nil
 	userTraffic = nil
 	return nil
 }
 
-func compareUserList(old, new []panel.UserInfo) (deleted, added, modified []panel.UserInfo) {
-	oldMap := make(map[string]panel.UserInfo, len(old))
-	for _, u := range old {
-		oldMap[u.Uuid] = u
+func compareUserList(old, new []panel.UserInfo) (deleted, added []panel.UserInfo) {
+	oldMap := make(map[string]int)
+	for i, user := range old {
+		key := user.Uuid + strconv.Itoa(user.SpeedLimit)
+		oldMap[key] = i
 	}
 
-	for _, u := range new {
-		if o, ok := oldMap[u.Uuid]; !ok {
-			added = append(added, u)
+	for _, user := range new {
+		key := user.Uuid + strconv.Itoa(user.SpeedLimit)
+		if _, exists := oldMap[key]; !exists {
+			added = append(added, user)
 		} else {
-			if o.SpeedLimit != u.SpeedLimit || o.DeviceLimit != u.DeviceLimit {
-				modified = append(modified, u)
-			}
-			delete(oldMap, u.Uuid)
+			delete(oldMap, key)
 		}
 	}
 
-	for _, o := range oldMap {
-		deleted = append(deleted, o)
+	for _, index := range oldMap {
+		deleted = append(deleted, old[index])
 	}
 
-	return deleted, added, modified
+	return deleted, added
 }

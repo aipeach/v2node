@@ -28,7 +28,7 @@ func New(nodes []conf.NodeConfig) (*Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		n.controllers[i] = NewController(p, &node, info)
+		n.controllers[i] = NewController(p, &nodes[i], info)
 		n.NodeInfos[i] = info
 	}
 	return n, nil

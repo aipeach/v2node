@@ -79,6 +79,10 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		}()
 	}
 	//init limiter
+	limiter.SetUserIPLimitCIDRPrefix(
+		c.UserIPLimitCIDRPrefixV4,
+		c.UserIPLimitCIDRPrefixV6,
+	)
 	limiter.Init()
 	//get node info
 	nodes, err := node.New(c.NodeConfigs)
@@ -185,6 +189,10 @@ func reload(config string, nodes **node.Node, v2core **core.V2Core) error {
 	if err != nil {
 		return err
 	}
+	limiter.SetUserIPLimitCIDRPrefix(
+		newConf.UserIPLimitCIDRPrefixV4,
+		newConf.UserIPLimitCIDRPrefixV6,
+	)
 
 	newCore := core.New(newConf)
 	// Reattach reload channel

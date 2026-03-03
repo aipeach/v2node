@@ -29,6 +29,17 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 	_ = c.nodeInfoMonitorPeriodic.Start(false)
 	log.WithField("tag", c.tag).Info("Start report node status")
 	_ = c.userReportPeriodic.Start(false)
+	if c.dynamicLimit != nil {
+		c.dynamicLimitPeriodic = &task.Task{
+			Name:     "dynamicSpeedLimitTask",
+			Interval: c.dynamicLimit.taskInterval(),
+			Timeout:  c.dynamicLimit.taskTimeout(),
+			Execute:  c.dynamicSpeedLimitTask,
+			Reload:   c.reloadTask,
+		}
+		log.WithField("tag", c.tag).Info("Start dynamic speed limit monitor")
+		_ = c.dynamicLimitPeriodic.Start(false)
+	}
 	if node.Security == panel.Tls {
 		switch c.info.Common.CertInfo.CertMode {
 		case "none", "", "file", "self":
@@ -54,6 +65,9 @@ func (c *Controller) reloadTask() {
 	c.apiClient = newClient
 	c.nodeInfoMonitorPeriodic.Close()
 	c.userReportPeriodic.Close()
+	if c.dynamicLimitPeriodic != nil {
+		c.dynamicLimitPeriodic.Close()
+	}
 	if c.renewCertPeriodic != nil {
 		c.renewCertPeriodic.Close()
 	}
@@ -114,7 +128,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		log.WithField("tag", c.tag).Debug("User list no change")
 		return nil
 	}
-	deleted, added, modified := compareUserList(c.userList, newU)
+	deleted, added := compareUserList(c.userList, newU)
 	if len(deleted) > 0 {
 		// have deleted users
 		err = c.server.DelUsers(deleted, c.tag, c.info)
@@ -141,11 +155,21 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			return nil
 		}
 	}
-	if len(added) > 0 || len(deleted) > 0 || len(modified) > 0 {
+	if len(added) > 0 || len(deleted) > 0 {
 		// update Limiter
-		c.limiter.UpdateUser(c.tag, added, deleted, modified)
+		c.limiter.UpdateUser(c.tag, added, deleted)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"tag": c.tag,
+				"err": err,
+			}).Error("limiter users failed")
+			return nil
+		}
 	}
 	c.userList = newU
-	log.WithField("tag", c.tag).Infof("%d user deleted, %d user added, %d user modified", len(deleted), len(added), len(modified))
+	if len(added)+len(deleted) != 0 {
+		log.WithField("tag", c.tag).
+			Infof("%d user deleted, %d user added", len(deleted), len(added))
+	}
 	return nil
 }

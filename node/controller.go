@@ -17,12 +17,14 @@ type Controller struct {
 	apiClient               *panel.Client
 	tag                     string
 	limiter                 *limiter.Limiter
+	dynamicLimit            *dynamicLimitRuntime
 	userList                []panel.UserInfo
 	aliveMap                map[int]int
 	conf                    *conf.NodeConfig
 	info                    *panel.NodeInfo
 	nodeInfoMonitorPeriodic *task.Task
 	userReportPeriodic      *task.Task
+	dynamicLimitPeriodic    *task.Task
 	renewCertPeriodic       *task.Task
 }
 
@@ -88,6 +90,10 @@ func (c *Controller) Start(x *core.V2Core) error {
 	}
 	log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	c.info = node
+	c.dynamicLimit, err = newDynamicLimitRuntime(c.server.Config)
+	if err != nil {
+		return fmt.Errorf("dynamic speed limit config error: %s", err)
+	}
 	c.startTasks(node)
 	return nil
 }
@@ -100,6 +106,9 @@ func (c *Controller) Close() error {
 	}
 	if c.userReportPeriodic != nil {
 		c.userReportPeriodic.Close()
+	}
+	if c.dynamicLimitPeriodic != nil {
+		c.dynamicLimitPeriodic.Close()
 	}
 	if c.renewCertPeriodic != nil {
 		c.renewCertPeriodic.Close()

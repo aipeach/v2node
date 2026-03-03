@@ -5,6 +5,7 @@ package dispatcher
 import (
 	"context"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -108,6 +109,7 @@ type DefaultDispatcher struct {
 	fdns         dns.FakeDNSEngine
 	Counter      sync.Map
 	LinkManagers sync.Map // map[string]*LinkManager
+	AuditCounter sync.Map // map[string]*counter.AuditCounter
 }
 
 func init() {
@@ -523,6 +525,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	ob := outbounds[len(outbounds)-1]
 
 	var handler outbound.Handler
+	var auditRuleID int
 
 	routingLink := routing_session.AsRoutingContext(ctx)
 	inTag := routingLink.GetInboundTag()
@@ -542,6 +545,7 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	} else if d.router != nil {
 		if route, err := d.router.PickRoute(routingLink); err == nil {
 			outTag := route.GetOutboundTag()
+			auditRuleID = parseAuditRuleID(route.GetRuleTag())
 			if h := d.ohm.GetHandler(outTag); h != nil {
 				isPickRoute = 2
 				if route.GetRuleTag() == "" {
@@ -572,6 +576,16 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 		return
 	}
 
+	if auditRuleID > 0 && handler.Tag() == "block" {
+		inbound := session.InboundFromContext(ctx)
+		if inTag == "" && inbound != nil {
+			inTag = inbound.Tag
+		}
+		if inbound != nil && inbound.User != nil {
+			d.recordAuditHit(inTag, inbound.User.Email, auditRuleID)
+		}
+	}
+
 	ob.Tag = handler.Tag()
 	if accessMessage := log.AccessMessageFromContext(ctx); accessMessage != nil {
 		if tag := handler.Tag(); tag != "" {
@@ -589,4 +603,37 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	}
 
 	handler.Dispatch(ctx, link)
+}
+
+func parseAuditRuleID(ruleTag string) int {
+	ruleTag = strings.TrimSpace(ruleTag)
+	if ruleTag == "" {
+		return 0
+	}
+	if strings.HasPrefix(ruleTag, "audit:") {
+		ruleTag = strings.TrimSpace(ruleTag[len("audit:"):])
+	}
+	id, err := strconv.Atoi(ruleTag)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
+}
+
+func (d *DefaultDispatcher) recordAuditHit(tag, email string, listID int) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" || listID <= 0 {
+		return
+	}
+	if v, ok := d.AuditCounter.Load(tag); ok {
+		v.(*counter.AuditCounter).Mark(email, listID)
+		return
+	}
+	store := counter.NewAuditCounter()
+	actual, loaded := d.AuditCounter.LoadOrStore(tag, store)
+	if loaded {
+		actual.(*counter.AuditCounter).Mark(email, listID)
+		return
+	}
+	store.Mark(email, listID)
 }

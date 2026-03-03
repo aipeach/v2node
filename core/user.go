@@ -106,6 +106,57 @@ func (vc *V2Core) GetUserTrafficSlice(tag string, mintraffic int) ([]panel.UserT
 	return nil, nil
 }
 
+func (vc *V2Core) GetUserTrafficTotalMap(tag string) (map[int]int64, error) {
+	result := make(map[int]int64)
+	vc.users.mapLock.RLock()
+	defer vc.users.mapLock.RUnlock()
+	if v, ok := vc.dispatcher.Counter.Load(tag); ok {
+		c := v.(*counter.TrafficCounter)
+		c.Counters.Range(func(key, value interface{}) bool {
+			email := key.(string)
+			uid := vc.users.uidMap[email]
+			if uid == 0 {
+				return true
+			}
+			traffic := value.(*counter.TrafficStorage)
+			result[uid] = traffic.UpCounter.Load() + traffic.DownCounter.Load()
+			return true
+		})
+	}
+	return result, nil
+}
+
+func (vc *V2Core) GetAndResetUserDetectLogs(tag string) ([]panel.DetectLog, error) {
+	if vc.dispatcher == nil {
+		return nil, nil
+	}
+	v, ok := vc.dispatcher.AuditCounter.Load(tag)
+	if !ok {
+		return nil, nil
+	}
+	hits := v.(*counter.AuditCounter).Drain()
+	if len(hits) == 0 {
+		return nil, nil
+	}
+	vc.users.mapLock.RLock()
+	defer vc.users.mapLock.RUnlock()
+	logs := make([]panel.DetectLog, 0, len(hits))
+	for _, hit := range hits {
+		uid := vc.users.uidMap[hit.Email]
+		if uid <= 0 || hit.ListID <= 0 {
+			continue
+		}
+		logs = append(logs, panel.DetectLog{
+			UID:    uid,
+			ListID: hit.ListID,
+		})
+	}
+	if len(logs) == 0 {
+		return nil, nil
+	}
+	return logs, nil
+}
+
 func (v *V2Core) AddUsers(p *AddUsersParams) (added int, err error) {
 	v.users.mapLock.Lock()
 	defer v.users.mapLock.Unlock()

@@ -11,6 +11,7 @@ import (
 type Task struct {
 	Name     string
 	Interval time.Duration
+	Timeout  time.Duration
 	Execute  func() error
 	Reload   func()
 	Access   sync.RWMutex
@@ -27,11 +28,13 @@ func (t *Task) Start(first bool) error {
 	t.Running = true
 	t.Stop = make(chan struct{})
 	t.Access.Unlock()
+
 	go func() {
 		timer := time.NewTimer(t.Interval)
 		defer timer.Stop()
 		if first {
 			if err := t.ExecuteWithTimeout(); err != nil {
+				t.safeStop()
 				return
 			}
 		}
@@ -56,7 +59,11 @@ func (t *Task) Start(first bool) error {
 }
 
 func (t *Task) ExecuteWithTimeout() error {
-	ctx, cancel := context.WithTimeout(context.Background(), min(3*t.Interval, 5*time.Minute))
+	timeout := t.Timeout
+	if timeout <= 0 {
+		timeout = min(3*t.Interval, 5*time.Minute)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	done := make(chan error, 1)
 
@@ -67,7 +74,9 @@ func (t *Task) ExecuteWithTimeout() error {
 	select {
 	case <-ctx.Done():
 		log.Errorf("Task %s execution timed out, reloading", t.Name)
-		t.Reload()
+		if t.Reload != nil {
+			t.Reload()
+		}
 		return nil
 	case err := <-done:
 		return err
