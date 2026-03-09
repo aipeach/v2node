@@ -8,6 +8,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"github.com/wyx2685/v2node/conf"
+	"github.com/wyx2685/v2node/limiter"
 )
 
 var utc8Location = time.FixedZone("UTC+8", 8*3600)
@@ -188,6 +189,12 @@ func (c *Controller) dynamicSpeedLimitTask() error {
 	updated := 0
 	for _, uid := range triggered {
 		if err := c.limiter.UpdateDynamicSpeedLimitByUID(uid, c.dynamicLimit.limitSpeed, expire); err == nil {
+			if err := limiter.SetGlobalDynamicSpeedLimitByUID(uid, c.dynamicLimit.limitSpeed, expire); err != nil {
+				log.WithFields(log.Fields{
+					"tag": c.tag,
+					"uid": uid,
+				}).WithError(err).Warn("Sync dynamic speed limit to redis failed")
+			}
 			updated++
 		}
 	}

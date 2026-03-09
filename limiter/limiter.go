@@ -198,6 +198,9 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 		u := v.(*UserLimitInfo)
 		deviceLimit = u.DeviceLimit
 		uid = u.UID
+		if syncGlobalDynamicSpeedLimit(uid, u) {
+			l.SpeedLimiter.Delete(taguuid)
+		}
 		if u.ExpireTime < time.Now().Unix() && u.ExpireTime != 0 {
 			if u.SpeedLimit != 0 {
 				userLimit = u.SpeedLimit
@@ -246,6 +249,9 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 					return nil, true
 				}
 			}
+		}
+		if checkGlobalDeviceLimit(taguuid, uid, deviceLimit, ip) {
+			return nil, true
 		}
 	}
 

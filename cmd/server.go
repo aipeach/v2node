@@ -84,6 +84,10 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		c.UserIPLimitCIDRPrefixV6,
 	)
 	limiter.Init()
+	if err := applyGlobalDeviceLimitConfig(c); err != nil {
+		log.WithField("err", err).Error("Init global device limit config failed")
+		return
+	}
 	//get node info
 	nodes, err := node.New(c.NodeConfigs)
 	if err != nil {
@@ -193,6 +197,9 @@ func reload(config string, nodes **node.Node, v2core **core.V2Core) error {
 		newConf.UserIPLimitCIDRPrefixV4,
 		newConf.UserIPLimitCIDRPrefixV6,
 	)
+	if err := applyGlobalDeviceLimitConfig(newConf); err != nil {
+		return err
+	}
 
 	newCore := core.New(newConf)
 	// Reattach reload channel
@@ -210,4 +217,18 @@ func reload(config string, nodes **node.Node, v2core **core.V2Core) error {
 
 	runtime.GC()
 	return nil
+}
+
+func applyGlobalDeviceLimitConfig(c *conf.Conf) error {
+	return limiter.SetGlobalDeviceLimitConfig(limiter.GlobalDeviceLimitConfig{
+		Enable:                  c.GlobalDeviceLimitConfig.Enable,
+		EnableDynamicSpeedLimit: c.GlobalDeviceLimitConfig.EnableDynamicSpeedLimit,
+		RedisNetwork:            c.GlobalDeviceLimitConfig.RedisNetwork,
+		RedisAddr:               c.GlobalDeviceLimitConfig.RedisAddr,
+		RedisUsername:           c.GlobalDeviceLimitConfig.RedisUsername,
+		RedisPassword:           c.GlobalDeviceLimitConfig.RedisPassword,
+		RedisDB:                 c.GlobalDeviceLimitConfig.RedisDB,
+		Timeout:                 c.GlobalDeviceLimitConfig.Timeout,
+		Expiry:                  c.GlobalDeviceLimitConfig.Expiry,
+	})
 }

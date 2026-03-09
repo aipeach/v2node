@@ -12,28 +12,29 @@ import (
 )
 
 type Conf struct {
-	LogConfig               LogConfig        `mapstructure:"Log"`
-	NodeConfigs             []NodeConfig     `mapstructure:"-"`
-	PprofPort               int              `mapstructure:"PprofPort"`
-	SubmitAliveIPMinTraffic int              `mapstructure:"submit_alive_ip_min_traffic"`
-	SubmitTrafficMinTraffic int              `mapstructure:"submit_traffic_min_traffic"`
-	UserIPLimitCIDRPrefixV4 int              `mapstructure:"user_ip_limit_cidr_prefix_v4"`
-	UserIPLimitCIDRPrefixV6 int              `mapstructure:"user_ip_limit_cidr_prefix_v6"`
-	GeositeFile             string           `mapstructure:"geosite_file"`
-	GeoipFile               string           `mapstructure:"geoip_file"`
-	AuditWhiteListFile      string           `mapstructure:"audit_white_list_file"`
-	ForbiddenPorts          string           `mapstructure:"forbidden_ports"`
-	BanPrivateIP            bool             `mapstructure:"ban_private_ip"`
-	ForbiddenBitTorrent     bool             `mapstructure:"forbidden_bit_torrent"`
-	DyLimitEnable           bool             `mapstructure:"dy_limit_enable"`
-	DyLimitDuration         string           `mapstructure:"dy_limit_duration"`
-	DyLimitTriggerTime      int              `mapstructure:"dy_limit_trigger_time"`
-	DyLimitTriggerSpeed     int              `mapstructure:"dy_limit_trigger_speed"`
-	DyLimitSpeed            int              `mapstructure:"dy_limit_speed"`
-	DyLimitTime             int              `mapstructure:"dy_limit_time"`
-	DyLimitWhiteUserID      string           `mapstructure:"dy_limit_white_user_id"`
-	DyLimitWhiteUserIDs     map[int]struct{} `mapstructure:"-"`
-	DNS                     DNSConfig        `mapstructure:"DNS"`
+	LogConfig               LogConfig               `mapstructure:"Log"`
+	NodeConfigs             []NodeConfig            `mapstructure:"-"`
+	PprofPort               int                     `mapstructure:"PprofPort"`
+	SubmitAliveIPMinTraffic int                     `mapstructure:"submit_alive_ip_min_traffic"`
+	SubmitTrafficMinTraffic int                     `mapstructure:"submit_traffic_min_traffic"`
+	UserIPLimitCIDRPrefixV4 int                     `mapstructure:"user_ip_limit_cidr_prefix_v4"`
+	UserIPLimitCIDRPrefixV6 int                     `mapstructure:"user_ip_limit_cidr_prefix_v6"`
+	GlobalDeviceLimitConfig GlobalDeviceLimitConfig `mapstructure:"GlobalDeviceLimitConfig"`
+	GeositeFile             string                  `mapstructure:"geosite_file"`
+	GeoipFile               string                  `mapstructure:"geoip_file"`
+	AuditWhiteListFile      string                  `mapstructure:"audit_white_list_file"`
+	ForbiddenPorts          string                  `mapstructure:"forbidden_ports"`
+	BanPrivateIP            bool                    `mapstructure:"ban_private_ip"`
+	ForbiddenBitTorrent     bool                    `mapstructure:"forbidden_bit_torrent"`
+	DyLimitEnable           bool                    `mapstructure:"dy_limit_enable"`
+	DyLimitDuration         string                  `mapstructure:"dy_limit_duration"`
+	DyLimitTriggerTime      int                     `mapstructure:"dy_limit_trigger_time"`
+	DyLimitTriggerSpeed     int                     `mapstructure:"dy_limit_trigger_speed"`
+	DyLimitSpeed            int                     `mapstructure:"dy_limit_speed"`
+	DyLimitTime             int                     `mapstructure:"dy_limit_time"`
+	DyLimitWhiteUserID      string                  `mapstructure:"dy_limit_white_user_id"`
+	DyLimitWhiteUserIDs     map[int]struct{}        `mapstructure:"-"`
+	DNS                     DNSConfig               `mapstructure:"DNS"`
 }
 
 type LogConfig struct {
@@ -44,6 +45,18 @@ type LogConfig struct {
 
 type DNSConfig struct {
 	File string `mapstructure:"File"`
+}
+
+type GlobalDeviceLimitConfig struct {
+	Enable                  bool   `mapstructure:"Enable"`
+	EnableDynamicSpeedLimit bool   `mapstructure:"EnableDynamicSpeedLimit"`
+	RedisNetwork            string `mapstructure:"RedisNetwork"`
+	RedisAddr               string `mapstructure:"RedisAddr"`
+	RedisUsername           string `mapstructure:"RedisUsername"`
+	RedisPassword           string `mapstructure:"RedisPassword"`
+	RedisDB                 int    `mapstructure:"RedisDB"`
+	Timeout                 int    `mapstructure:"Timeout"`
+	Expiry                  int    `mapstructure:"Expiry"`
 }
 
 type NodeConfig struct {
@@ -71,27 +84,28 @@ type nodeConfigSource struct {
 }
 
 type fileConf struct {
-	LogConfig               LogConfig          `mapstructure:"Log"`
-	NodeSources             []nodeConfigSource `mapstructure:"Nodes"`
-	PprofPort               int                `mapstructure:"PprofPort"`
-	SubmitAliveIPMinTraffic int                `mapstructure:"submit_alive_ip_min_traffic"`
-	SubmitTrafficMinTraffic int                `mapstructure:"submit_traffic_min_traffic"`
-	UserIPLimitCIDRPrefixV4 int                `mapstructure:"user_ip_limit_cidr_prefix_v4"`
-	UserIPLimitCIDRPrefixV6 int                `mapstructure:"user_ip_limit_cidr_prefix_v6"`
-	GeositeFile             string             `mapstructure:"geosite_file"`
-	GeoipFile               string             `mapstructure:"geoip_file"`
-	AuditWhiteListFile      string             `mapstructure:"audit_white_list_file"`
-	ForbiddenPorts          string             `mapstructure:"forbidden_ports"`
-	BanPrivateIP            bool               `mapstructure:"ban_private_ip"`
-	ForbiddenBitTorrent     bool               `mapstructure:"forbidden_bit_torrent"`
-	DyLimitEnable           bool               `mapstructure:"dy_limit_enable"`
-	DyLimitDuration         string             `mapstructure:"dy_limit_duration"`
-	DyLimitTriggerTime      int                `mapstructure:"dy_limit_trigger_time"`
-	DyLimitTriggerSpeed     int                `mapstructure:"dy_limit_trigger_speed"`
-	DyLimitSpeed            int                `mapstructure:"dy_limit_speed"`
-	DyLimitTime             int                `mapstructure:"dy_limit_time"`
-	DyLimitWhiteUserID      string             `mapstructure:"dy_limit_white_user_id"`
-	DNS                     DNSConfig          `mapstructure:"DNS"`
+	LogConfig               LogConfig               `mapstructure:"Log"`
+	NodeSources             []nodeConfigSource      `mapstructure:"Nodes"`
+	PprofPort               int                     `mapstructure:"PprofPort"`
+	SubmitAliveIPMinTraffic int                     `mapstructure:"submit_alive_ip_min_traffic"`
+	SubmitTrafficMinTraffic int                     `mapstructure:"submit_traffic_min_traffic"`
+	UserIPLimitCIDRPrefixV4 int                     `mapstructure:"user_ip_limit_cidr_prefix_v4"`
+	UserIPLimitCIDRPrefixV6 int                     `mapstructure:"user_ip_limit_cidr_prefix_v6"`
+	GlobalDeviceLimitConfig GlobalDeviceLimitConfig `mapstructure:"GlobalDeviceLimitConfig"`
+	GeositeFile             string                  `mapstructure:"geosite_file"`
+	GeoipFile               string                  `mapstructure:"geoip_file"`
+	AuditWhiteListFile      string                  `mapstructure:"audit_white_list_file"`
+	ForbiddenPorts          string                  `mapstructure:"forbidden_ports"`
+	BanPrivateIP            bool                    `mapstructure:"ban_private_ip"`
+	ForbiddenBitTorrent     bool                    `mapstructure:"forbidden_bit_torrent"`
+	DyLimitEnable           bool                    `mapstructure:"dy_limit_enable"`
+	DyLimitDuration         string                  `mapstructure:"dy_limit_duration"`
+	DyLimitTriggerTime      int                     `mapstructure:"dy_limit_trigger_time"`
+	DyLimitTriggerSpeed     int                     `mapstructure:"dy_limit_trigger_speed"`
+	DyLimitSpeed            int                     `mapstructure:"dy_limit_speed"`
+	DyLimitTime             int                     `mapstructure:"dy_limit_time"`
+	DyLimitWhiteUserID      string                  `mapstructure:"dy_limit_white_user_id"`
+	DNS                     DNSConfig               `mapstructure:"DNS"`
 }
 
 func New() *Conf {
@@ -105,18 +119,27 @@ func New() *Conf {
 		SubmitTrafficMinTraffic: -1,
 		UserIPLimitCIDRPrefixV4: 32,
 		UserIPLimitCIDRPrefixV6: 128,
-		GeositeFile:             "/etc/v2node/geosite.dat",
-		GeoipFile:               "/etc/v2node/geoip.dat",
-		AuditWhiteListFile:      "/etc/v2node/whiteList",
-		ForbiddenPorts:          "",
-		BanPrivateIP:            false,
-		ForbiddenBitTorrent:     true,
-		DyLimitEnable:           false,
-		DyLimitTriggerTime:      60,
-		DyLimitTriggerSpeed:     100,
-		DyLimitSpeed:            30,
-		DyLimitTime:             600,
-		DyLimitWhiteUserIDs:     map[int]struct{}{},
+		GlobalDeviceLimitConfig: GlobalDeviceLimitConfig{
+			Enable:                  false,
+			EnableDynamicSpeedLimit: false,
+			RedisNetwork:            "tcp",
+			RedisAddr:               "127.0.0.1:6379",
+			RedisDB:                 0,
+			Timeout:                 5,
+			Expiry:                  60,
+		},
+		GeositeFile:         "/etc/v2node/geosite.dat",
+		GeoipFile:           "/etc/v2node/geoip.dat",
+		AuditWhiteListFile:  "/etc/v2node/whiteList",
+		ForbiddenPorts:      "",
+		BanPrivateIP:        false,
+		ForbiddenBitTorrent: true,
+		DyLimitEnable:       false,
+		DyLimitTriggerTime:  60,
+		DyLimitTriggerSpeed: 100,
+		DyLimitSpeed:        30,
+		DyLimitTime:         600,
+		DyLimitWhiteUserIDs: map[int]struct{}{},
 	}
 }
 
@@ -137,6 +160,7 @@ func (p *Conf) LoadFromPath(filePath string) error {
 		SubmitTrafficMinTraffic: p.SubmitTrafficMinTraffic,
 		UserIPLimitCIDRPrefixV4: p.UserIPLimitCIDRPrefixV4,
 		UserIPLimitCIDRPrefixV6: p.UserIPLimitCIDRPrefixV6,
+		GlobalDeviceLimitConfig: p.GlobalDeviceLimitConfig,
 		GeositeFile:             p.GeositeFile,
 		GeoipFile:               p.GeoipFile,
 		AuditWhiteListFile:      p.AuditWhiteListFile,
@@ -165,12 +189,28 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.SubmitTrafficMinTraffic = loaded.SubmitTrafficMinTraffic
 	p.UserIPLimitCIDRPrefixV4 = loaded.UserIPLimitCIDRPrefixV4
 	p.UserIPLimitCIDRPrefixV6 = loaded.UserIPLimitCIDRPrefixV6
+	p.GlobalDeviceLimitConfig = loaded.GlobalDeviceLimitConfig
 	p.GeositeFile = strings.TrimSpace(loaded.GeositeFile)
 	p.GeoipFile = strings.TrimSpace(loaded.GeoipFile)
 	p.AuditWhiteListFile = strings.TrimSpace(loaded.AuditWhiteListFile)
 	p.ForbiddenPorts = strings.TrimSpace(loaded.ForbiddenPorts)
 	p.BanPrivateIP = loaded.BanPrivateIP
 	p.ForbiddenBitTorrent = loaded.ForbiddenBitTorrent
+	p.GlobalDeviceLimitConfig.RedisNetwork = strings.ToLower(strings.TrimSpace(p.GlobalDeviceLimitConfig.RedisNetwork))
+	if p.GlobalDeviceLimitConfig.RedisNetwork == "" {
+		p.GlobalDeviceLimitConfig.RedisNetwork = "tcp"
+	}
+	p.GlobalDeviceLimitConfig.RedisAddr = strings.TrimSpace(p.GlobalDeviceLimitConfig.RedisAddr)
+	p.GlobalDeviceLimitConfig.RedisUsername = strings.TrimSpace(p.GlobalDeviceLimitConfig.RedisUsername)
+	if p.GlobalDeviceLimitConfig.RedisDB < 0 {
+		p.GlobalDeviceLimitConfig.RedisDB = 0
+	}
+	if p.GlobalDeviceLimitConfig.Timeout <= 0 {
+		p.GlobalDeviceLimitConfig.Timeout = 5
+	}
+	if p.GlobalDeviceLimitConfig.Expiry <= 0 {
+		p.GlobalDeviceLimitConfig.Expiry = 60
+	}
 	p.DyLimitEnable = loaded.DyLimitEnable
 	p.DyLimitDuration = loaded.DyLimitDuration
 	p.DyLimitTriggerTime = loaded.DyLimitTriggerTime
