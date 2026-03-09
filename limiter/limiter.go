@@ -250,7 +250,7 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 				}
 			}
 		}
-		if checkGlobalDeviceLimit(taguuid, uid, deviceLimit, ip) {
+		if checkGlobalDeviceLimit(uid, deviceLimit, ip) {
 			return nil, true
 		}
 	}

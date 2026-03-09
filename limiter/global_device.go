@@ -115,7 +115,7 @@ func normalizeGlobalDeviceLimitConfig(cfg GlobalDeviceLimitConfig) GlobalDeviceL
 	return cfg
 }
 
-func checkGlobalDeviceLimit(taguuid string, uid, deviceLimit int, ip string) bool {
+func checkGlobalDeviceLimit(uid, deviceLimit int, ip string) bool {
 	if uid <= 0 || deviceLimit <= 0 {
 		return false
 	}
@@ -127,8 +127,7 @@ func checkGlobalDeviceLimit(taguuid string, uid, deviceLimit int, ip string) boo
 		return false
 	}
 
-	uuid := extractUUIDFromTagUUID(taguuid)
-	key := buildGlobalDeviceLimitKey(uuid, uid, deviceLimit)
+	key := buildGlobalDeviceLimitKey(uid, deviceLimit)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(runtime.config.Timeout)*time.Second)
 	defer cancel()
 
@@ -241,18 +240,7 @@ func syncGlobalDynamicSpeedLimit(uid int, info *UserLimitInfo) bool {
 	return changed
 }
 
-func extractUUIDFromTagUUID(taguuid string) string {
-	parts := strings.SplitN(taguuid, "|", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-	return parts[1]
-}
-
-func buildGlobalDeviceLimitKey(uuid string, uid, deviceLimit int) string {
-	if uuid != "" {
-		return fmt.Sprintf("v2node:global-device:uuid:%s:%d", uuid, deviceLimit)
-	}
+func buildGlobalDeviceLimitKey(uid, deviceLimit int) string {
 	return fmt.Sprintf("v2node:global-device:uid:%d:%d", uid, deviceLimit)
 }
 
