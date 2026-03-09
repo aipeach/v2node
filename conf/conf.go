@@ -34,6 +34,9 @@ type Conf struct {
 	DyLimitTime             int                     `mapstructure:"dy_limit_time"`
 	DyLimitWhiteUserID      string                  `mapstructure:"dy_limit_white_user_id"`
 	DyLimitWhiteUserIDs     map[int]struct{}        `mapstructure:"-"`
+	IPUserCacheTime         int                     `mapstructure:"ip_user_cache_time"`
+	IPUserCacheSaveEnable   bool                    `mapstructure:"ip_user_cache_save_enable"`
+	IPUserCacheSaveDir      string                  `mapstructure:"ip_user_cache_save_dir"`
 	DNS                     DNSConfig               `mapstructure:"DNS"`
 }
 
@@ -105,6 +108,9 @@ type fileConf struct {
 	DyLimitSpeed            int                     `mapstructure:"dy_limit_speed"`
 	DyLimitTime             int                     `mapstructure:"dy_limit_time"`
 	DyLimitWhiteUserID      string                  `mapstructure:"dy_limit_white_user_id"`
+	IPUserCacheTime         int                     `mapstructure:"ip_user_cache_time"`
+	IPUserCacheSaveEnable   bool                    `mapstructure:"ip_user_cache_save_enable"`
+	IPUserCacheSaveDir      string                  `mapstructure:"ip_user_cache_save_dir"`
 	DNS                     DNSConfig               `mapstructure:"DNS"`
 }
 
@@ -128,18 +134,21 @@ func New() *Conf {
 			Timeout:                 5,
 			Expiry:                  60,
 		},
-		GeositeFile:         "/etc/v2node/geosite.dat",
-		GeoipFile:           "/etc/v2node/geoip.dat",
-		AuditWhiteListFile:  "/etc/v2node/whiteList",
-		ForbiddenPorts:      "",
-		BanPrivateIP:        false,
-		ForbiddenBitTorrent: true,
-		DyLimitEnable:       false,
-		DyLimitTriggerTime:  60,
-		DyLimitTriggerSpeed: 100,
-		DyLimitSpeed:        30,
-		DyLimitTime:         600,
-		DyLimitWhiteUserIDs: map[int]struct{}{},
+		GeositeFile:           "/etc/v2node/geosite.dat",
+		GeoipFile:             "/etc/v2node/geoip.dat",
+		AuditWhiteListFile:    "/etc/v2node/whiteList",
+		ForbiddenPorts:        "",
+		BanPrivateIP:          false,
+		ForbiddenBitTorrent:   true,
+		DyLimitEnable:         false,
+		DyLimitTriggerTime:    60,
+		DyLimitTriggerSpeed:   100,
+		DyLimitSpeed:          30,
+		DyLimitTime:           600,
+		DyLimitWhiteUserIDs:   map[int]struct{}{},
+		IPUserCacheTime:       24,
+		IPUserCacheSaveEnable: true,
+		IPUserCacheSaveDir:    "/etc/v2node",
 	}
 }
 
@@ -174,6 +183,9 @@ func (p *Conf) LoadFromPath(filePath string) error {
 		DyLimitSpeed:            p.DyLimitSpeed,
 		DyLimitTime:             p.DyLimitTime,
 		DyLimitWhiteUserID:      p.DyLimitWhiteUserID,
+		IPUserCacheTime:         p.IPUserCacheTime,
+		IPUserCacheSaveEnable:   p.IPUserCacheSaveEnable,
+		IPUserCacheSaveDir:      p.IPUserCacheSaveDir,
 	}
 	if err := v.Unmarshal(&loaded); err != nil {
 		return fmt.Errorf("unmarshal config error: %s", err)
@@ -218,6 +230,9 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.DyLimitSpeed = loaded.DyLimitSpeed
 	p.DyLimitTime = loaded.DyLimitTime
 	p.DyLimitWhiteUserID = loaded.DyLimitWhiteUserID
+	p.IPUserCacheTime = loaded.IPUserCacheTime
+	p.IPUserCacheSaveEnable = loaded.IPUserCacheSaveEnable
+	p.IPUserCacheSaveDir = strings.TrimSpace(loaded.IPUserCacheSaveDir)
 	p.DNS = loaded.DNS
 	if p.DNS.File != "" && !filepath.IsAbs(p.DNS.File) {
 		p.DNS.File = filepath.Join(filepath.Dir(filePath), p.DNS.File)
@@ -244,6 +259,12 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	}
 	if p.DyLimitTime <= 0 {
 		p.DyLimitTime = 600
+	}
+	if p.IPUserCacheTime <= 0 {
+		p.IPUserCacheTime = 24
+	}
+	if p.IPUserCacheSaveDir == "" {
+		p.IPUserCacheSaveDir = "/etc/v2node"
 	}
 	whiteIDs, err := parseUserIDSet(p.DyLimitWhiteUserID)
 	if err != nil {
