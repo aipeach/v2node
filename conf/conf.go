@@ -62,6 +62,18 @@ type GlobalDeviceLimitConfig struct {
 	Expiry                  int    `mapstructure:"Expiry"`
 }
 
+type CertConfig struct {
+	CertMode         string            `mapstructure:"CertMode"`
+	CertDomain       string            `mapstructure:"CertDomain"`
+	CertFile         string            `mapstructure:"CertFile"`
+	KeyFile          string            `mapstructure:"KeyFile"`
+	KeyType          string            `mapstructure:"KeyType"`
+	Provider         string            `mapstructure:"Provider"`
+	Email            string            `mapstructure:"Email"`
+	DNSEnv           map[string]string `mapstructure:"DNSEnv"`
+	RejectUnknownSni bool              `mapstructure:"RejectUnknownSni"`
+}
+
 type NodeConfig struct {
 	APIHost             string `mapstructure:"ApiHost"`
 	NodeID              int
@@ -69,8 +81,9 @@ type NodeConfig struct {
 	Key                 string `mapstructure:"ApiKey"`
 	Timeout             int    `mapstructure:"Timeout"`
 	ListenIP            string `mapstructure:"ListenIP"`
-	CertFile            string `mapstructure:"CertFile"`
-	KeyFile             string `mapstructure:"KeyFile"`
+	CertConfig          *CertConfig
+	CertFile            string `mapstructure:"CertFile"` // 兼容旧配置
+	KeyFile             string `mapstructure:"KeyFile"`  // 兼容旧配置
 	AcceptProxyProtocol bool   `mapstructure:"acceptProxyProtocol"`
 }
 
@@ -81,6 +94,7 @@ type nodeConfigSource struct {
 	Key                 string      `mapstructure:"ApiKey"`
 	Timeout             int         `mapstructure:"Timeout"`
 	ListenIP            string      `mapstructure:"ListenIP"`
+	CertConfig          *CertConfig `mapstructure:"CertConfig"`
 	CertFile            string      `mapstructure:"CertFile"`
 	KeyFile             string      `mapstructure:"KeyFile"`
 	AcceptProxyProtocol bool        `mapstructure:"acceptProxyProtocol"`
@@ -234,17 +248,21 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.IPUserCacheSaveEnable = loaded.IPUserCacheSaveEnable
 	p.IPUserCacheSaveDir = strings.TrimSpace(loaded.IPUserCacheSaveDir)
 	p.DNS = loaded.DNS
+	configDir := filepath.Dir(filePath)
+	for i := range p.NodeConfigs {
+		normalizeNodeCertConfig(&p.NodeConfigs[i], configDir)
+	}
 	if p.DNS.File != "" && !filepath.IsAbs(p.DNS.File) {
-		p.DNS.File = filepath.Join(filepath.Dir(filePath), p.DNS.File)
+		p.DNS.File = filepath.Join(configDir, p.DNS.File)
 	}
 	if p.GeositeFile != "" && !filepath.IsAbs(p.GeositeFile) {
-		p.GeositeFile = filepath.Join(filepath.Dir(filePath), p.GeositeFile)
+		p.GeositeFile = filepath.Join(configDir, p.GeositeFile)
 	}
 	if p.GeoipFile != "" && !filepath.IsAbs(p.GeoipFile) {
-		p.GeoipFile = filepath.Join(filepath.Dir(filePath), p.GeoipFile)
+		p.GeoipFile = filepath.Join(configDir, p.GeoipFile)
 	}
 	if p.AuditWhiteListFile != "" && !filepath.IsAbs(p.AuditWhiteListFile) {
-		p.AuditWhiteListFile = filepath.Join(filepath.Dir(filePath), p.AuditWhiteListFile)
+		p.AuditWhiteListFile = filepath.Join(configDir, p.AuditWhiteListFile)
 	}
 	p.UserIPLimitCIDRPrefixV4 = clamp(p.UserIPLimitCIDRPrefixV4, 0, 32)
 	p.UserIPLimitCIDRPrefixV6 = clamp(p.UserIPLimitCIDRPrefixV6, 0, 128)
@@ -292,6 +310,37 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 			if nodeType == "" {
 				nodeType = "vmess"
 			}
+			certConfig := cloneCertConfig(source.CertConfig)
+			if certConfig == nil && (strings.TrimSpace(source.CertFile) != "" || strings.TrimSpace(source.KeyFile) != "") {
+				certConfig = &CertConfig{
+					CertMode: "file",
+					CertFile: source.CertFile,
+					KeyFile:  source.KeyFile,
+				}
+			}
+			if certConfig != nil {
+				certConfig.CertMode = strings.ToLower(strings.TrimSpace(certConfig.CertMode))
+				if certConfig.CertMode == "" && (strings.TrimSpace(certConfig.CertFile) != "" || strings.TrimSpace(certConfig.KeyFile) != "") {
+					certConfig.CertMode = "file"
+				}
+				certConfig.CertDomain = strings.TrimSpace(certConfig.CertDomain)
+				certConfig.CertFile = strings.TrimSpace(certConfig.CertFile)
+				certConfig.KeyFile = strings.TrimSpace(certConfig.KeyFile)
+				certConfig.KeyType = strings.ToLower(strings.TrimSpace(certConfig.KeyType))
+				certConfig.Provider = strings.TrimSpace(certConfig.Provider)
+				certConfig.Email = strings.TrimSpace(certConfig.Email)
+				certConfig.DNSEnv = normalizeDNSEnv(certConfig.DNSEnv)
+			}
+			certFile := strings.TrimSpace(source.CertFile)
+			keyFile := strings.TrimSpace(source.KeyFile)
+			if certConfig != nil {
+				if certConfig.CertFile != "" {
+					certFile = certConfig.CertFile
+				}
+				if certConfig.KeyFile != "" {
+					keyFile = certConfig.KeyFile
+				}
+			}
 			out = append(out, NodeConfig{
 				APIHost:             source.APIHost,
 				NodeID:              nodeID,
@@ -299,13 +348,99 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 				Key:                 source.Key,
 				Timeout:             source.Timeout,
 				ListenIP:            source.ListenIP,
-				CertFile:            source.CertFile,
-				KeyFile:             source.KeyFile,
+				CertConfig:          certConfig,
+				CertFile:            certFile,
+				KeyFile:             keyFile,
 				AcceptProxyProtocol: source.AcceptProxyProtocol,
 			})
 		}
 	}
 	return out, nil
+}
+
+func cloneCertConfig(src *CertConfig) *CertConfig {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	if src.DNSEnv != nil {
+		dst.DNSEnv = make(map[string]string, len(src.DNSEnv))
+		for k, v := range src.DNSEnv {
+			dst.DNSEnv[k] = v
+		}
+	}
+	return &dst
+}
+
+func normalizeDNSEnv(src map[string]string) map[string]string {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for k, v := range src {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(v)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeNodeCertConfig(node *NodeConfig, configDir string) {
+	if node == nil {
+		return
+	}
+	node.CertFile = strings.TrimSpace(node.CertFile)
+	node.KeyFile = strings.TrimSpace(node.KeyFile)
+
+	certConfig := cloneCertConfig(node.CertConfig)
+	if certConfig == nil && (node.CertFile != "" || node.KeyFile != "") {
+		certConfig = &CertConfig{
+			CertMode: "file",
+			CertFile: node.CertFile,
+			KeyFile:  node.KeyFile,
+		}
+	}
+	if certConfig == nil {
+		return
+	}
+
+	certConfig.CertMode = strings.ToLower(strings.TrimSpace(certConfig.CertMode))
+	if certConfig.CertMode == "" && (strings.TrimSpace(certConfig.CertFile) != "" || strings.TrimSpace(certConfig.KeyFile) != "") {
+		certConfig.CertMode = "file"
+	}
+	certConfig.CertDomain = strings.TrimSpace(certConfig.CertDomain)
+	certConfig.CertFile = strings.TrimSpace(certConfig.CertFile)
+	certConfig.KeyFile = strings.TrimSpace(certConfig.KeyFile)
+	certConfig.KeyType = strings.ToLower(strings.TrimSpace(certConfig.KeyType))
+	certConfig.Provider = strings.TrimSpace(certConfig.Provider)
+	certConfig.Email = strings.TrimSpace(certConfig.Email)
+	certConfig.DNSEnv = normalizeDNSEnv(certConfig.DNSEnv)
+
+	if certConfig.CertFile != "" && !filepath.IsAbs(certConfig.CertFile) {
+		certConfig.CertFile = filepath.Join(configDir, certConfig.CertFile)
+	}
+	if certConfig.KeyFile != "" && !filepath.IsAbs(certConfig.KeyFile) {
+		certConfig.KeyFile = filepath.Join(configDir, certConfig.KeyFile)
+	}
+
+	if certConfig.CertFile != "" {
+		node.CertFile = certConfig.CertFile
+	} else if node.CertFile != "" && !filepath.IsAbs(node.CertFile) {
+		node.CertFile = filepath.Join(configDir, node.CertFile)
+		certConfig.CertFile = node.CertFile
+	}
+	if certConfig.KeyFile != "" {
+		node.KeyFile = certConfig.KeyFile
+	} else if node.KeyFile != "" && !filepath.IsAbs(node.KeyFile) {
+		node.KeyFile = filepath.Join(configDir, node.KeyFile)
+		certConfig.KeyFile = node.KeyFile
+	}
+	node.CertConfig = certConfig
 }
 
 func parseNodeIDs(raw interface{}) ([]int, error) {

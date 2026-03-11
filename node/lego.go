@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge/http01"
+	"github.com/go-acme/lego/v4/challenge/tlsalpn01"
 	"github.com/go-acme/lego/v4/providers/dns"
 	"github.com/go-acme/lego/v4/registration"
 
@@ -39,8 +40,12 @@ func NewLego(config *panel.CertInfo) (*Lego, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create user error: %s", err)
 	}
+	keyType, err := parseCertKeyType(config.KeyType)
+	if err != nil {
+		return nil, err
+	}
 	c := lego.NewConfig(user)
-	c.Certificate.KeyType = certcrypto.RSA2048
+	c.Certificate.KeyType = keyType
 	client, err := lego.NewClient(c)
 	if err != nil {
 		return nil, err
@@ -66,6 +71,19 @@ func checkPath(p string) error {
 	return nil
 }
 
+func parseCertKeyType(raw string) (certcrypto.KeyType, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "rsa":
+		return certcrypto.RSA2048, nil
+	case "ec-256":
+		return certcrypto.EC256, nil
+	case "ec-384":
+		return certcrypto.EC384, nil
+	default:
+		return "", fmt.Errorf("unsupported cert key type: %s (allowed: empty/rsa/ec-256/ec-384)", raw)
+	}
+}
+
 func (l *Lego) SetProvider() error {
 	switch l.config.CertMode {
 	case "http":
@@ -73,9 +91,14 @@ func (l *Lego) SetProvider() error {
 		if err != nil {
 			return err
 		}
+	case "tls":
+		err := l.client.Challenge.SetTLSALPN01Provider(tlsalpn01.NewProviderServer("", ""))
+		if err != nil {
+			return err
+		}
 	case "dns":
 		for k, v := range l.config.DNSEnv {
-			os.Setenv(k, v)
+			os.Setenv(strings.ToUpper(k), v)
 		}
 		p, err := dns.NewDNSChallengeProviderByName(l.config.Provider)
 		if err != nil {
@@ -85,6 +108,8 @@ func (l *Lego) SetProvider() error {
 		if err != nil {
 			return fmt.Errorf("set dns provider error: %s", err)
 		}
+	default:
+		return fmt.Errorf("unsupported certmode for challenge: %s", l.config.CertMode)
 	}
 	return nil
 }

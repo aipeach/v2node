@@ -8,6 +8,7 @@ import (
 	"net"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,7 @@ type TlsSettings struct {
 	CertMode         string `json:"cert_mode"`
 	CertFile         string `json:"cert_file"`
 	KeyFile          string `json:"key_file"`
+	KeyType          string `json:"key_type"`
 	Provider         string `json:"provider"`
 	DNSEnv           string `json:"dns_env"`
 	RejectUnknownSni string `json:"reject_unknown_sni"`
@@ -97,6 +99,7 @@ type CertInfo struct {
 	CertMode         string
 	CertFile         string
 	KeyFile          string
+	KeyType          string
 	Email            string
 	CertDomain       string
 	DNSEnv           map[string]string
@@ -261,47 +264,19 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 	}
 
 	if endpoint.SecurityMode == "tls" {
-		cf := endpoint.ExtraParams["cert_file"]
-		kf := endpoint.ExtraParams["key_file"]
-		if client.CertFile != "" {
-			cf = strings.TrimSpace(client.CertFile)
-		}
-		if client.KeyFile != "" {
-			kf = strings.TrimSpace(client.KeyFile)
-		}
-		if cf == "" {
-			cf = filepath.Join("/etc/v2node/", common.Protocol+strconv.Itoa(nodeID)+".cer")
-		}
-		if kf == "" {
-			kf = filepath.Join("/etc/v2node/", common.Protocol+strconv.Itoa(nodeID)+".key")
-		}
-		certDomain := chooseCertDomain(endpoint)
-		certMode := strings.ToLower(strings.TrimSpace(endpoint.ExtraParams["cert_mode"]))
-		if certMode == "" {
-			certMode = "self"
-		}
-		dnsEnvRaw := strings.TrimSpace(endpoint.ExtraParams["dns_env"])
-		rejectUnknownSni := parseBool(endpoint.ExtraParams["reject_unknown_sni"])
+		certInfo := resolveCertInfo(endpoint, client, common.Protocol, nodeID)
 		common.Tls = Tls
 		common.TlsSettings = TlsSettings{
-			ServerName:       certDomain,
-			CertMode:         certMode,
-			CertFile:         cf,
-			KeyFile:          kf,
-			Provider:         endpoint.ExtraParams["provider"],
-			DNSEnv:           dnsEnvRaw,
-			RejectUnknownSni: boolToString(rejectUnknownSni),
+			ServerName:       certInfo.CertDomain,
+			CertMode:         certInfo.CertMode,
+			CertFile:         certInfo.CertFile,
+			KeyFile:          certInfo.KeyFile,
+			KeyType:          certInfo.KeyType,
+			Provider:         certInfo.Provider,
+			DNSEnv:           dnsEnvToString(certInfo.DNSEnv),
+			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
 		}
-		common.CertInfo = &CertInfo{
-			CertMode:         certMode,
-			CertFile:         cf,
-			KeyFile:          kf,
-			Email:            firstNonEmpty(endpoint.ExtraParams["email"], "node@sspanel.local"),
-			CertDomain:       certDomain,
-			DNSEnv:           parseDNSEnv(dnsEnvRaw),
-			Provider:         endpoint.ExtraParams["provider"],
-			RejectUnknownSni: rejectUnknownSni,
-		}
+		common.CertInfo = certInfo
 		node.Security = Tls
 	}
 
@@ -443,6 +418,83 @@ func chooseCertDomain(endpoint *vmessEndpoint) string {
 	return endpoint.ListenIP
 }
 
+func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, nodeID int) *CertInfo {
+	certMode := strings.ToLower(strings.TrimSpace(endpoint.ExtraParams["cert_mode"]))
+	if certMode == "" {
+		certMode = "self"
+	}
+	certDomain := chooseCertDomain(endpoint)
+	certFile := strings.TrimSpace(endpoint.ExtraParams["cert_file"])
+	keyFile := strings.TrimSpace(endpoint.ExtraParams["key_file"])
+	keyType := strings.ToLower(strings.TrimSpace(endpoint.ExtraParams["key_type"]))
+	provider := strings.TrimSpace(endpoint.ExtraParams["provider"])
+	email := firstNonEmpty(endpoint.ExtraParams["email"], "node@sspanel.local")
+	dnsEnv := parseDNSEnv(strings.TrimSpace(endpoint.ExtraParams["dns_env"]))
+	rejectUnknownSni := parseBool(endpoint.ExtraParams["reject_unknown_sni"])
+
+	if client.CertFile != "" {
+		certFile = strings.TrimSpace(client.CertFile)
+	}
+	if client.KeyFile != "" {
+		keyFile = strings.TrimSpace(client.KeyFile)
+	}
+
+	if client.CertConfig != nil {
+		local := client.CertConfig
+		if mode := strings.ToLower(strings.TrimSpace(local.CertMode)); mode != "" {
+			certMode = mode
+		}
+		if domain := strings.TrimSpace(local.CertDomain); domain != "" {
+			certDomain = domain
+		}
+		if cf := strings.TrimSpace(local.CertFile); cf != "" {
+			certFile = cf
+		}
+		if kf := strings.TrimSpace(local.KeyFile); kf != "" {
+			keyFile = kf
+		}
+		if kt := strings.ToLower(strings.TrimSpace(local.KeyType)); kt != "" {
+			keyType = kt
+		}
+		if p := strings.TrimSpace(local.Provider); p != "" {
+			provider = p
+		}
+		if e := strings.TrimSpace(local.Email); e != "" {
+			email = e
+		}
+		if len(local.DNSEnv) > 0 {
+			dnsEnv = make(map[string]string, len(local.DNSEnv))
+			for k, v := range local.DNSEnv {
+				key := strings.TrimSpace(k)
+				if key == "" {
+					continue
+				}
+				dnsEnv[key] = strings.TrimSpace(v)
+			}
+		}
+		rejectUnknownSni = local.RejectUnknownSni
+	}
+
+	if certFile == "" {
+		certFile = filepath.Join("/etc/v2node/", protocol+strconv.Itoa(nodeID)+".cer")
+	}
+	if keyFile == "" {
+		keyFile = filepath.Join("/etc/v2node/", protocol+strconv.Itoa(nodeID)+".key")
+	}
+
+	return &CertInfo{
+		CertMode:         certMode,
+		CertFile:         certFile,
+		KeyFile:          keyFile,
+		KeyType:          keyType,
+		Email:            email,
+		CertDomain:       certDomain,
+		DNSEnv:           dnsEnv,
+		Provider:         provider,
+		RejectUnknownSni: rejectUnknownSni,
+	}
+}
+
 func parseDNSEnv(raw string) map[string]string {
 	out := map[string]string{}
 	for _, segment := range strings.Split(raw, ",") {
@@ -457,6 +509,25 @@ func parseDNSEnv(raw string) map[string]string {
 		}
 	}
 	return out
+}
+
+func dnsEnvToString(env map[string]string) string {
+	if len(env) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	segments := make([]string, 0, len(keys))
+	for _, k := range keys {
+		segments = append(segments, fmt.Sprintf("%s=%s", k, strings.TrimSpace(env[k])))
+	}
+	return strings.Join(segments, ",")
 }
 
 func parseBool(raw string) bool {
