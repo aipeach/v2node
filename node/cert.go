@@ -9,28 +9,47 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	panel "github.com/wyx2685/v2node/api/v2board"
 	"github.com/wyx2685/v2node/common/file"
 )
 
 func (c *Controller) renewCertTask() error {
-	l, err := NewLego(c.info.Common.CertInfo)
-	if err != nil {
-		log.WithField("tag", c.tag).Info("new lego error: ", err)
-		return nil
-	}
-	err = l.RenewCert()
-	if err != nil {
-		log.WithField("tag", c.tag).Info("renew cert error: ", err)
-		return nil
+	for _, cert := range c.certInfosForTLS() {
+		if !isAutoRenewCertMode(cert.CertMode) {
+			continue
+		}
+		l, err := NewLego(cert)
+		if err != nil {
+			log.WithField("tag", c.tag).Info("new lego error: ", err)
+			continue
+		}
+		err = l.RenewCert()
+		if err != nil {
+			log.WithField("tag", c.tag).Info("renew cert error: ", err)
+			continue
+		}
+		log.WithField("tag", c.tag).Infof("renew cert success: mode=%s domain=%s cert=%s", cert.CertMode, cert.CertDomain, cert.CertFile)
 	}
 	return nil
 }
 
 func (c *Controller) requestCert() error {
-	cert := c.info.Common.CertInfo
+	for _, cert := range c.certInfosForTLS() {
+		if err := c.requestSingleCert(cert); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Controller) requestSingleCert(cert *panel.CertInfo) error {
+	if cert == nil {
+		return nil
+	}
 	switch cert.CertMode {
 	case "none", "":
 	case "file":
@@ -70,6 +89,51 @@ func (c *Controller) requestCert() error {
 		return fmt.Errorf("unsupported certmode: %s", cert.CertMode)
 	}
 	return nil
+}
+
+func (c *Controller) certInfosForTLS() []*panel.CertInfo {
+	if c.info == nil || c.info.Common == nil {
+		return nil
+	}
+	out := make([]*panel.CertInfo, 0, 1+len(c.info.Common.ExtraCertInfos))
+	seen := map[string]struct{}{}
+	appendCert := func(cert *panel.CertInfo) {
+		if cert == nil {
+			return
+		}
+		uniq := strings.ToLower(strings.TrimSpace(cert.CertMode)) + "\x00" +
+			strings.TrimSpace(cert.CertFile) + "\x00" +
+			strings.TrimSpace(cert.KeyFile) + "\x00" +
+			strings.TrimSpace(cert.CertDomain)
+		if _, ok := seen[uniq]; ok {
+			return
+		}
+		seen[uniq] = struct{}{}
+		out = append(out, cert)
+	}
+	appendCert(c.info.Common.CertInfo)
+	for _, cert := range c.info.Common.ExtraCertInfos {
+		appendCert(cert)
+	}
+	return out
+}
+
+func (c *Controller) needRenewCertTask() bool {
+	for _, cert := range c.certInfosForTLS() {
+		if isAutoRenewCertMode(cert.CertMode) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAutoRenewCertMode(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "dns", "http", "tls":
+		return true
+	default:
+		return false
+	}
 }
 
 func generateSelfSslCertificate(domain, certPath, keyPath string) error {

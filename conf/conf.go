@@ -14,6 +14,9 @@ import (
 type Conf struct {
 	LogConfig               LogConfig               `mapstructure:"Log"`
 	NodeConfigs             []NodeConfig            `mapstructure:"-"`
+	GlobalCertConfig        *CertConfig             `mapstructure:"GlobalCertConfig"`
+	GlobalCertFile          string                  `mapstructure:"GlobalCertFile"`
+	GlobalKeyFile           string                  `mapstructure:"GlobalKeyFile"`
 	PprofPort               int                     `mapstructure:"PprofPort"`
 	SubmitAliveIPMinTraffic int                     `mapstructure:"submit_alive_ip_min_traffic"`
 	SubmitTrafficMinTraffic int                     `mapstructure:"submit_traffic_min_traffic"`
@@ -82,6 +85,7 @@ type NodeConfig struct {
 	Timeout             int    `mapstructure:"Timeout"`
 	ListenIP            string `mapstructure:"ListenIP"`
 	CertConfig          *CertConfig
+	GlobalCertConfig    *CertConfig
 	CertFile            string `mapstructure:"CertFile"` // 兼容旧配置
 	KeyFile             string `mapstructure:"KeyFile"`  // 兼容旧配置
 	AcceptProxyProtocol bool   `mapstructure:"acceptProxyProtocol"`
@@ -103,6 +107,9 @@ type nodeConfigSource struct {
 type fileConf struct {
 	LogConfig               LogConfig               `mapstructure:"Log"`
 	NodeSources             []nodeConfigSource      `mapstructure:"Nodes"`
+	GlobalCertConfig        *CertConfig             `mapstructure:"GlobalCertConfig"`
+	GlobalCertFile          string                  `mapstructure:"GlobalCertFile"`
+	GlobalKeyFile           string                  `mapstructure:"GlobalKeyFile"`
 	PprofPort               int                     `mapstructure:"PprofPort"`
 	SubmitAliveIPMinTraffic int                     `mapstructure:"submit_alive_ip_min_traffic"`
 	SubmitTrafficMinTraffic int                     `mapstructure:"submit_traffic_min_traffic"`
@@ -179,6 +186,9 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	}
 	loaded := fileConf{
 		LogConfig:               p.LogConfig,
+		GlobalCertConfig:        p.GlobalCertConfig,
+		GlobalCertFile:          p.GlobalCertFile,
+		GlobalKeyFile:           p.GlobalKeyFile,
 		SubmitAliveIPMinTraffic: p.SubmitAliveIPMinTraffic,
 		SubmitTrafficMinTraffic: p.SubmitTrafficMinTraffic,
 		UserIPLimitCIDRPrefixV4: p.UserIPLimitCIDRPrefixV4,
@@ -247,10 +257,23 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.IPUserCacheTime = loaded.IPUserCacheTime
 	p.IPUserCacheSaveEnable = loaded.IPUserCacheSaveEnable
 	p.IPUserCacheSaveDir = strings.TrimSpace(loaded.IPUserCacheSaveDir)
+	p.GlobalCertFile = strings.TrimSpace(loaded.GlobalCertFile)
+	p.GlobalKeyFile = strings.TrimSpace(loaded.GlobalKeyFile)
 	p.DNS = loaded.DNS
 	configDir := filepath.Dir(filePath)
+	globalCertConfig := cloneCertConfig(loaded.GlobalCertConfig)
+	if globalCertConfig == nil && (p.GlobalCertFile != "" || p.GlobalKeyFile != "") {
+		globalCertConfig = &CertConfig{
+			CertMode: "file",
+			CertFile: p.GlobalCertFile,
+			KeyFile:  p.GlobalKeyFile,
+		}
+	}
+	globalCertConfig = normalizeCertConfig(globalCertConfig, configDir)
+	p.GlobalCertConfig = globalCertConfig
 	for i := range p.NodeConfigs {
 		normalizeNodeCertConfig(&p.NodeConfigs[i], configDir)
+		p.NodeConfigs[i].GlobalCertConfig = cloneCertConfig(globalCertConfig)
 	}
 	if p.DNS.File != "" && !filepath.IsAbs(p.DNS.File) {
 		p.DNS.File = filepath.Join(configDir, p.DNS.File)
@@ -319,17 +342,7 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 				}
 			}
 			if certConfig != nil {
-				certConfig.CertMode = strings.ToLower(strings.TrimSpace(certConfig.CertMode))
-				if certConfig.CertMode == "" && (strings.TrimSpace(certConfig.CertFile) != "" || strings.TrimSpace(certConfig.KeyFile) != "") {
-					certConfig.CertMode = "file"
-				}
-				certConfig.CertDomain = strings.TrimSpace(certConfig.CertDomain)
-				certConfig.CertFile = strings.TrimSpace(certConfig.CertFile)
-				certConfig.KeyFile = strings.TrimSpace(certConfig.KeyFile)
-				certConfig.KeyType = strings.ToLower(strings.TrimSpace(certConfig.KeyType))
-				certConfig.Provider = strings.TrimSpace(certConfig.Provider)
-				certConfig.Email = strings.TrimSpace(certConfig.Email)
-				certConfig.DNSEnv = normalizeDNSEnv(certConfig.DNSEnv)
+				certConfig = normalizeCertConfig(certConfig, "")
 			}
 			certFile := strings.TrimSpace(source.CertFile)
 			keyFile := strings.TrimSpace(source.KeyFile)
@@ -390,6 +403,35 @@ func normalizeDNSEnv(src map[string]string) map[string]string {
 	return out
 }
 
+func normalizeCertConfig(certConfig *CertConfig, configDir string) *CertConfig {
+	certConfig = cloneCertConfig(certConfig)
+	if certConfig == nil {
+		return nil
+	}
+
+	certConfig.CertMode = strings.ToLower(strings.TrimSpace(certConfig.CertMode))
+	if certConfig.CertMode == "" && (strings.TrimSpace(certConfig.CertFile) != "" || strings.TrimSpace(certConfig.KeyFile) != "") {
+		certConfig.CertMode = "file"
+	}
+	certConfig.CertDomain = strings.TrimSpace(certConfig.CertDomain)
+	certConfig.CertFile = strings.TrimSpace(certConfig.CertFile)
+	certConfig.KeyFile = strings.TrimSpace(certConfig.KeyFile)
+	certConfig.KeyType = strings.ToLower(strings.TrimSpace(certConfig.KeyType))
+	certConfig.Provider = strings.TrimSpace(certConfig.Provider)
+	certConfig.Email = strings.TrimSpace(certConfig.Email)
+	certConfig.DNSEnv = normalizeDNSEnv(certConfig.DNSEnv)
+
+	if configDir != "" {
+		if certConfig.CertFile != "" && !filepath.IsAbs(certConfig.CertFile) {
+			certConfig.CertFile = filepath.Join(configDir, certConfig.CertFile)
+		}
+		if certConfig.KeyFile != "" && !filepath.IsAbs(certConfig.KeyFile) {
+			certConfig.KeyFile = filepath.Join(configDir, certConfig.KeyFile)
+		}
+	}
+	return certConfig
+}
+
 func normalizeNodeCertConfig(node *NodeConfig, configDir string) {
 	if node == nil {
 		return
@@ -409,24 +451,7 @@ func normalizeNodeCertConfig(node *NodeConfig, configDir string) {
 		return
 	}
 
-	certConfig.CertMode = strings.ToLower(strings.TrimSpace(certConfig.CertMode))
-	if certConfig.CertMode == "" && (strings.TrimSpace(certConfig.CertFile) != "" || strings.TrimSpace(certConfig.KeyFile) != "") {
-		certConfig.CertMode = "file"
-	}
-	certConfig.CertDomain = strings.TrimSpace(certConfig.CertDomain)
-	certConfig.CertFile = strings.TrimSpace(certConfig.CertFile)
-	certConfig.KeyFile = strings.TrimSpace(certConfig.KeyFile)
-	certConfig.KeyType = strings.ToLower(strings.TrimSpace(certConfig.KeyType))
-	certConfig.Provider = strings.TrimSpace(certConfig.Provider)
-	certConfig.Email = strings.TrimSpace(certConfig.Email)
-	certConfig.DNSEnv = normalizeDNSEnv(certConfig.DNSEnv)
-
-	if certConfig.CertFile != "" && !filepath.IsAbs(certConfig.CertFile) {
-		certConfig.CertFile = filepath.Join(configDir, certConfig.CertFile)
-	}
-	if certConfig.KeyFile != "" && !filepath.IsAbs(certConfig.KeyFile) {
-		certConfig.KeyFile = filepath.Join(configDir, certConfig.KeyFile)
-	}
+	certConfig = normalizeCertConfig(certConfig, configDir)
 
 	if certConfig.CertFile != "" {
 		node.CertFile = certConfig.CertFile

@@ -41,9 +41,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 		_ = c.dynamicLimitPeriodic.Start(false)
 	}
 	if node.Security == panel.Tls {
-		switch c.info.Common.CertInfo.CertMode {
-		case "none", "", "file", "self":
-		default:
+		if c.needRenewCertTask() {
 			c.renewCertPeriodic = &task.Task{
 				Name:     "renewCertTask",
 				Interval: time.Hour * 24,

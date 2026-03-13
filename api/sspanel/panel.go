@@ -19,6 +19,7 @@ type Client struct {
 	NodeType         string
 	ListenIP         string
 	CertConfig       *conf.CertConfig
+	GlobalCertConfig *conf.CertConfig
 	CertFile         string
 	KeyFile          string
 	AcceptProxyProto bool
@@ -63,6 +64,7 @@ func New(c *conf.NodeConfig) (*Client, error) {
 		NodeType:         c.NodeType,
 		ListenIP:         c.ListenIP,
 		CertConfig:       c.CertConfig,
+		GlobalCertConfig: c.GlobalCertConfig,
 		CertFile:         c.CertFile,
 		KeyFile:          c.KeyFile,
 		AcceptProxyProto: c.AcceptProxyProtocol,

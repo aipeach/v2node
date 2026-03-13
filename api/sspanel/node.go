@@ -41,6 +41,7 @@ type CommonNode struct {
 	Tls                int         `json:"tls"`
 	TlsSettings        TlsSettings `json:"tls_settings"`
 	CertInfo           *CertInfo
+	ExtraCertInfos     []*CertInfo
 	Network            string          `json:"network"`
 	NetworkSettings    json.RawMessage `json:"network_settings"`
 	Encryption         string          `json:"encryption"`
@@ -277,6 +278,11 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
 		}
 		common.CertInfo = certInfo
+		if globalCertInfo := resolveGlobalCertInfo(client, certInfo.CertDomain); globalCertInfo != nil {
+			if !sameCertPair(certInfo, globalCertInfo) {
+				common.ExtraCertInfos = append(common.ExtraCertInfos, globalCertInfo)
+			}
+		}
 		node.Security = Tls
 	}
 
@@ -493,6 +499,79 @@ func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, n
 		Provider:         provider,
 		RejectUnknownSni: rejectUnknownSni,
 	}
+}
+
+func resolveGlobalCertInfo(client *Client, defaultDomain string) *CertInfo {
+	if client == nil || client.GlobalCertConfig == nil {
+		return nil
+	}
+	global := client.GlobalCertConfig
+	certMode := strings.ToLower(strings.TrimSpace(global.CertMode))
+	certDomain := strings.TrimSpace(global.CertDomain)
+	if certDomain == "" {
+		certDomain = strings.TrimSpace(defaultDomain)
+	}
+	certFile := strings.TrimSpace(global.CertFile)
+	keyFile := strings.TrimSpace(global.KeyFile)
+	if certMode == "" && (certFile != "" || keyFile != "") {
+		certMode = "file"
+	}
+	if certMode == "" || certMode == "none" {
+		return nil
+	}
+	if certFile == "" || keyFile == "" {
+		suffix := sanitizeCertFileToken(certDomain)
+		if suffix == "" {
+			suffix = "default"
+		}
+		if certFile == "" {
+			certFile = filepath.Join("/etc/v2node/", "global_"+suffix+".cer")
+		}
+		if keyFile == "" {
+			keyFile = filepath.Join("/etc/v2node/", "global_"+suffix+".key")
+		}
+	}
+
+	dnsEnv := map[string]string{}
+	for k, v := range global.DNSEnv {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		dnsEnv[key] = strings.TrimSpace(v)
+	}
+	email := strings.TrimSpace(global.Email)
+	if email == "" {
+		email = "node@sspanel.local"
+	}
+	return &CertInfo{
+		CertMode:         certMode,
+		CertFile:         certFile,
+		KeyFile:          keyFile,
+		KeyType:          strings.ToLower(strings.TrimSpace(global.KeyType)),
+		Email:            email,
+		CertDomain:       certDomain,
+		DNSEnv:           dnsEnv,
+		Provider:         strings.TrimSpace(global.Provider),
+		RejectUnknownSni: global.RejectUnknownSni,
+	}
+}
+
+func sanitizeCertFileToken(input string) string {
+	input = strings.TrimSpace(strings.ToLower(input))
+	if input == "" {
+		return ""
+	}
+	re := regexp.MustCompile(`[^a-z0-9._-]+`)
+	return strings.Trim(re.ReplaceAllString(input, "_"), "_")
+}
+
+func sameCertPair(a *CertInfo, b *CertInfo) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return strings.TrimSpace(a.CertFile) == strings.TrimSpace(b.CertFile) &&
+		strings.TrimSpace(a.KeyFile) == strings.TrimSpace(b.KeyFile)
 }
 
 func parseDNSEnv(raw string) map[string]string {

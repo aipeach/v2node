@@ -117,22 +117,19 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerCon
 		if nodeInfo.Common.CertInfo == nil {
 			return nil, errors.New("the CertInfo is not vail")
 		}
-		switch nodeInfo.Common.CertInfo.CertMode {
-		case "none", "":
-			break
-		default:
+		certs := make([]*coreConf.TLSCertConfig, 0, 1+len(nodeInfo.Common.ExtraCertInfos))
+		seen := map[string]struct{}{}
+		certs = appendTLSCert(certs, seen, nodeInfo.Common.CertInfo)
+		for _, certInfo := range nodeInfo.Common.ExtraCertInfos {
+			certs = appendTLSCert(certs, seen, certInfo)
+		}
+		if len(certs) > 0 {
 			if in.StreamSetting == nil {
 				in.StreamSetting = &coreConf.StreamConfig{}
 			}
 			in.StreamSetting.Security = "tls"
 			in.StreamSetting.TLSSettings = &coreConf.TLSConfig{
-				Certs: []*coreConf.TLSCertConfig{
-					{
-						CertFile:     nodeInfo.Common.CertInfo.CertFile,
-						KeyFile:      nodeInfo.Common.CertInfo.KeyFile,
-						OcspStapling: 3600,
-					},
-				},
+				Certs:            certs,
 				RejectUnknownSNI: nodeInfo.Common.CertInfo.RejectUnknownSni,
 			}
 		}
@@ -168,6 +165,32 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerCon
 	}
 	in.Tag = tag
 	return in.Build()
+}
+
+func appendTLSCert(certs []*coreConf.TLSCertConfig, seen map[string]struct{}, certInfo *panel.CertInfo) []*coreConf.TLSCertConfig {
+	if certInfo == nil {
+		return certs
+	}
+	switch strings.ToLower(strings.TrimSpace(certInfo.CertMode)) {
+	case "", "none":
+		return certs
+	}
+	certFile := strings.TrimSpace(certInfo.CertFile)
+	keyFile := strings.TrimSpace(certInfo.KeyFile)
+	if certFile == "" || keyFile == "" {
+		return certs
+	}
+	uniq := certFile + "\x00" + keyFile
+	if _, ok := seen[uniq]; ok {
+		return certs
+	}
+	seen[uniq] = struct{}{}
+	certs = append(certs, &coreConf.TLSCertConfig{
+		CertFile:     certFile,
+		KeyFile:      keyFile,
+		OcspStapling: 3600,
+	})
+	return certs
 }
 
 func buildVLess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
