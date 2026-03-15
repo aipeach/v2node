@@ -42,7 +42,26 @@ func (v *V2Core) GetUserManager(tag string) (proxy.UserManager, error) {
 	return userManager, nil
 }
 
-func (vc *V2Core) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) error {
+func (vc *V2Core) DelUsers(users []panel.UserInfo, tag string, nodeInfo *panel.NodeInfo) error {
+	if nodeInfo != nil && nodeInfo.Type == "shadowsocksr" {
+		vc.users.mapLock.Lock()
+		defer vc.users.mapLock.Unlock()
+		for i := range users {
+			user := format.UserTag(tag, users[i].Uuid)
+			delete(vc.users.uidMap, user)
+			if v, ok := vc.dispatcher.Counter.Load(tag); ok {
+				tc := v.(*counter.TrafficCounter)
+				tc.Delete(user)
+			}
+			if v, ok := vc.dispatcher.LinkManagers.Load(user); ok {
+				lm := v.(*dispatcher.LinkManager)
+				lm.CloseAll()
+				vc.dispatcher.LinkManagers.Delete(user)
+			}
+		}
+		return nil
+	}
+
 	userManager, err := vc.GetUserManager(tag)
 	if err != nil {
 		return fmt.Errorf("get user manager error: %s", err)
@@ -182,6 +201,10 @@ func (v *V2Core) AddUsers(p *AddUsersParams) (added int, err error) {
 		users = buildTuicUsers(p.Tag, p.Users)
 	case "anytls":
 		users = buildAnyTLSUsers(p.Tag, p.Users)
+	case "shadowsocksr":
+		// shadowsocksr inbound currently does not implement dynamic UserManager.
+		// Users are injected when building inbound config; here we only maintain uid map.
+		return len(p.Users), nil
 	default:
 		return 0, fmt.Errorf("unsupported node type: %s", p.NodeInfo.Type)
 	}

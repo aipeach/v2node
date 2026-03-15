@@ -51,6 +51,15 @@ type CommonNode struct {
 	//shadowsocks
 	Cipher    string `json:"cipher"`
 	ServerKey string `json:"server_key"`
+	//shadowsocksr
+	SSRMethod        string `json:"ssr_method"`
+	SSRPassword      string `json:"ssr_password"`
+	SSRMultiUserMode string `json:"ssr_multi_user_mode"`
+	SSRProtocol      string `json:"ssr_protocol"`
+	SSRProtocolParam string `json:"ssr_protocol_param"`
+	SSROBFS          string `json:"ssr_obfs"`
+	SSROBFSParam     string `json:"ssr_obfs_param"`
+	SSObfsUDP        bool   `json:"ss_obfs_udp"`
 	//tuic
 	CongestionControl string `json:"congestion_control"`
 	ZeroRTTHandshake  bool   `json:"zero_rtt_handshake"`
@@ -206,15 +215,23 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 	if client == nil {
 		return nil, fmt.Errorf("nil api client")
 	}
-	nodeID := client.NodeId
 	protocol := strings.ToLower(strings.TrimSpace(client.NodeType))
 	if protocol == "" {
 		protocol = "vmess"
 	}
-	if protocol != "vmess" {
+	switch {
+	case protocol == "vmess":
+		return buildModMUVmessNodeInfo(client, data, routes)
+	case isSSRNodeType(protocol):
+		return buildModMUSSRNodeInfo(client, data, routes)
+	default:
 		return nil, fmt.Errorf("unsupported node type from config: %s", protocol)
 	}
+}
 
+func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
+	nodeID := client.NodeId
+	protocol := "vmess"
 	endpoint, err := parseVMessEndpoint(data.Server)
 	if err != nil {
 		return nil, fmt.Errorf("parse node server field failed: %w", err)
@@ -287,6 +304,114 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 	}
 
 	return node, nil
+}
+
+func buildModMUSSRNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
+	templateUser, err := client.fetchSSRTemplateUser()
+	if err != nil {
+		return nil, err
+	}
+	serverPort := intFromAny(templateUser.Port)
+	if serverPort <= 0 {
+		return nil, fmt.Errorf("invalid ssr template user port: %v", templateUser.Port)
+	}
+	method := strings.TrimSpace(templateUser.Method)
+	if method == "" {
+		return nil, fmt.Errorf("ssr template user method is empty")
+	}
+	password := strings.TrimSpace(templateUser.Passwd)
+	if password == "" {
+		return nil, fmt.Errorf("ssr template user password is empty")
+	}
+
+	protocol := "shadowsocksr"
+	multiUserMode := ssrSinglePortModeFromFlag(intFromAny(templateUser.IsMultiUser))
+	if multiUserMode == "" {
+		return nil, fmt.Errorf("unknown ssr single-port mode from is_multi_user=%v", templateUser.IsMultiUser)
+	}
+	interval := data.DisconnectTime
+	if interval <= 0 {
+		interval = 60
+	}
+	listenIP := resolveSSRListenIP(client.ListenIP, data.Server)
+	common := &CommonNode{
+		Protocol:         protocol,
+		ListenIP:         listenIP,
+		ServerPort:       serverPort,
+		Routes:           cloneRoutes(routes),
+		SSRMethod:        method,
+		SSRPassword:      password,
+		SSRMultiUserMode: multiUserMode,
+		SSRProtocol:      strings.TrimSpace(templateUser.Protocol),
+		SSRProtocolParam: strings.TrimSpace(templateUser.ProtocolParam),
+		SSROBFS:          strings.TrimSpace(templateUser.Obfs),
+		SSROBFSParam:     strings.TrimSpace(templateUser.ObfsParam),
+		SSObfsUDP:        client.SSObfsUDP,
+		BaseConfig: &BaseConfig{
+			PushInterval:           interval,
+			PullInterval:           interval,
+			DeviceOnlineMinTraffic: 0,
+			NodeReportMinTraffic:   0,
+		},
+	}
+
+	return &NodeInfo{
+		Id:           client.NodeId,
+		Type:         protocol,
+		Security:     None,
+		PushInterval: time.Duration(interval) * time.Second,
+		PullInterval: time.Duration(interval) * time.Second,
+		Tag:          fmt.Sprintf("[%s]-%s:%d", client.APIHost, protocol, client.NodeId),
+		Common:       common,
+	}, nil
+}
+
+func (c *Client) fetchSSRTemplateUser() (*modMUUserRow, error) {
+	const path = "/mod_mu/users"
+	r, err := c.client.R().Get(path)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, fmt.Errorf("received nil response")
+	}
+	if r.StatusCode() >= 400 {
+		return nil, fmt.Errorf("get user list for ssr node failed with status %d: %s", r.StatusCode(), string(r.Body()))
+	}
+	resp := &modMUUsersResponse{}
+	if err := json.Unmarshal(r.Body(), resp); err != nil {
+		return nil, fmt.Errorf("decode mod_mu user list error: %w", err)
+	}
+	if resp.Ret != 1 {
+		return nil, fmt.Errorf("mod_mu user list ret=%d, body=%s", resp.Ret, string(r.Body()))
+	}
+	templateUser, err := findSSRTemplateUser(resp.Data)
+	if err != nil {
+		return nil, err
+	}
+	return templateUser, nil
+}
+
+func isSSRNodeType(nodeType string) bool {
+	switch strings.ToLower(strings.TrimSpace(nodeType)) {
+	case "ssr", "shadowsocksr":
+		return true
+	default:
+		return false
+	}
+}
+
+func resolveSSRListenIP(configListenIP string, serverField string) string {
+	if ip := strings.TrimSpace(configListenIP); ip != "" {
+		return ip
+	}
+	parts := strings.SplitN(strings.TrimSpace(serverField), ";", 2)
+	if len(parts) > 0 {
+		if ip := strings.TrimSpace(parts[0]); ip != "" && net.ParseIP(ip) != nil {
+			return ip
+		}
+	}
+	return "0.0.0.0"
 }
 
 func parseVMessEndpoint(server string) (*vmessEndpoint, error) {

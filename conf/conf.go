@@ -84,6 +84,9 @@ type NodeConfig struct {
 	Key                 string `mapstructure:"ApiKey"`
 	Timeout             int    `mapstructure:"Timeout"`
 	ListenIP            string `mapstructure:"ListenIP"`
+	MUSuffix            string `mapstructure:"mu_suffix"`
+	MURegex             string `mapstructure:"mu_regex"`
+	SSObfsUDP           bool   `mapstructure:"ss_obfs_udp"`
 	CertConfig          *CertConfig
 	GlobalCertConfig    *CertConfig
 	CertFile            string `mapstructure:"CertFile"` // 兼容旧配置
@@ -98,6 +101,9 @@ type nodeConfigSource struct {
 	Key                 string      `mapstructure:"ApiKey"`
 	Timeout             int         `mapstructure:"Timeout"`
 	ListenIP            string      `mapstructure:"ListenIP"`
+	MUSuffix            string      `mapstructure:"mu_suffix"`
+	MURegex             string      `mapstructure:"mu_regex"`
+	SSObfsUDP           bool        `mapstructure:"ss_obfs_udp"`
 	CertConfig          *CertConfig `mapstructure:"CertConfig"`
 	CertFile            string      `mapstructure:"CertFile"`
 	KeyFile             string      `mapstructure:"KeyFile"`
@@ -361,6 +367,9 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 				Key:                 source.Key,
 				Timeout:             source.Timeout,
 				ListenIP:            source.ListenIP,
+				MUSuffix:            source.MUSuffix,
+				MURegex:             source.MURegex,
+				SSObfsUDP:           source.SSObfsUDP,
 				CertConfig:          certConfig,
 				CertFile:            certFile,
 				KeyFile:             keyFile,

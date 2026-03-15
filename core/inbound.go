@@ -12,6 +12,7 @@ import (
 	"time"
 
 	panel "github.com/wyx2685/v2node/api/v2board"
+	"github.com/wyx2685/v2node/common/format"
 	"github.com/xtls/xray-core/common/net"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/inbound"
@@ -46,7 +47,7 @@ func (v *V2Core) addInbound(config *core.InboundHandlerConfig) error {
 }
 
 // BuildInbound build Inbound config for different protocol
-func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerConfig, error) {
+func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) (*core.InboundHandlerConfig, error) {
 	in := &coreConf.InboundDetourConfig{}
 	var err error
 	switch nodeInfo.Type {
@@ -58,6 +59,8 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerCon
 		err = buildTrojan(nodeInfo, in)
 	case "shadowsocks":
 		err = buildShadowsocks(nodeInfo, in)
+	case "shadowsocksr":
+		err = buildShadowsocksR(nodeInfo, in, tag, users)
 	case "hysteria2":
 		err = buildHysteria2(nodeInfo, in)
 	case "tuic":
@@ -427,6 +430,58 @@ func buildShadowsocks(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourC
 	if err != nil {
 		return fmt.Errorf("marshal shadowsocks settings error: %s", err)
 	}
+	return nil
+}
+
+func buildShadowsocksR(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig, tag string, users []panel.UserInfo) error {
+	inbound.Protocol = "shadowsocksr"
+	s := nodeInfo.Common
+	networkList := &coreConf.NetworkList{"tcp", "udp"}
+	if strings.EqualFold(strings.TrimSpace(s.SSRMultiUserMode), "obfs") && !s.SSObfsUDP {
+		networkList = &coreConf.NetworkList{"tcp"}
+	}
+	settings := &coreConf.ShadowsocksRServerConfig{
+		NetworkList: networkList,
+		Cipher:      s.SSRMethod,
+		Password:    s.SSRPassword,
+		Protocol:    s.SSRProtocol,
+		ProtocolArg: s.SSRProtocolParam,
+		Obfs:        s.SSROBFS,
+		ObfsArg:     s.SSROBFSParam,
+	}
+	if len(users) > 0 {
+		settings.Users = make([]*coreConf.ShadowsocksRUserConfig, 0, len(users))
+		for i := range users {
+			clientPassword := strings.TrimSpace(users[i].SSRClientPassword)
+			protocolParam := strings.TrimSpace(users[i].SSRProtocolParam)
+			obfsParam := strings.TrimSpace(users[i].SSROBFSParam)
+			if clientPassword == "" && protocolParam == "" && obfsParam == "" {
+				continue
+			}
+			userConfig := &coreConf.ShadowsocksRUserConfig{
+				Email:    format.UserTag(tag, users[i].Uuid),
+				Password: clientPassword,
+			}
+			if protocolParam != "" {
+				userConfig.ProtocolArg = protocolParam
+				if userConfig.Password == "" {
+					userConfig.Password = protocolParam
+				}
+			}
+			if obfsParam != "" {
+				userConfig.ObfsArg = obfsParam
+				if userConfig.Password == "" {
+					userConfig.Password = obfsParam
+				}
+			}
+			settings.Users = append(settings.Users, userConfig)
+		}
+	}
+	sets, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal shadowsocksr settings error: %s", err)
+	}
+	inbound.Settings = (*json.RawMessage)(&sets)
 	return nil
 }
 

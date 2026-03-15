@@ -1,8 +1,11 @@
 package panel
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -12,10 +15,13 @@ type OnlineUser struct {
 }
 
 type UserInfo struct {
-	Id          int    `json:"id" msgpack:"id"`
-	Uuid        string `json:"uuid" msgpack:"uuid"`
-	SpeedLimit  int    `json:"speed_limit" msgpack:"speed_limit"`
-	DeviceLimit int    `json:"device_limit" msgpack:"device_limit"`
+	Id                int    `json:"id" msgpack:"id"`
+	Uuid              string `json:"uuid" msgpack:"uuid"`
+	SpeedLimit        int    `json:"speed_limit" msgpack:"speed_limit"`
+	DeviceLimit       int    `json:"device_limit" msgpack:"device_limit"`
+	SSRClientPassword string `json:"-" msgpack:"-"`
+	SSRProtocolParam  string `json:"-" msgpack:"-"`
+	SSROBFSParam      string `json:"-" msgpack:"-"`
 }
 
 type UserListBody struct {
@@ -35,6 +41,13 @@ type modMUUserRow struct {
 	ID             int         `json:"id"`
 	UUID           string      `json:"uuid"`
 	Passwd         string      `json:"passwd"`
+	Port           interface{} `json:"port"`
+	Method         string      `json:"method"`
+	Protocol       string      `json:"protocol"`
+	ProtocolParam  string      `json:"protocol_param"`
+	Obfs           string      `json:"obfs"`
+	ObfsParam      string      `json:"obfs_param"`
+	IsMultiUser    interface{} `json:"is_multi_user"`
 	NodeSpeedlimit interface{} `json:"node_speedlimit"`
 	NodeConnector  interface{} `json:"node_connector"`
 	AliveIP        interface{} `json:"alive_ip"`
@@ -74,21 +87,29 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 
 	users := make([]UserInfo, 0, len(resp.Data))
 	alive := make(map[int]int, len(resp.Data))
-	for _, row := range resp.Data {
-		uuid := strings.TrimSpace(row.UUID)
-		if uuid == "" {
-			uuid = strings.TrimSpace(row.Passwd)
+	if isSSRNodeType(c.NodeType) {
+		var err error
+		users, alive, err = c.buildSSRUsers(resp.Data)
+		if err != nil {
+			return nil, err
 		}
-		if uuid == "" || row.ID <= 0 {
-			continue
+	} else {
+		for _, row := range resp.Data {
+			uuid := strings.TrimSpace(row.UUID)
+			if uuid == "" {
+				uuid = strings.TrimSpace(row.Passwd)
+			}
+			if uuid == "" || row.ID <= 0 {
+				continue
+			}
+			users = append(users, UserInfo{
+				Id:          row.ID,
+				Uuid:        uuid,
+				SpeedLimit:  intFromAny(row.NodeSpeedlimit),
+				DeviceLimit: intFromAny(row.NodeConnector),
+			})
+			alive[row.ID] = intFromAny(row.AliveIP)
 		}
-		users = append(users, UserInfo{
-			Id:          row.ID,
-			Uuid:        uuid,
-			SpeedLimit:  intFromAny(row.NodeSpeedlimit),
-			DeviceLimit: intFromAny(row.NodeConnector),
-		})
-		alive[row.ID] = intFromAny(row.AliveIP)
 	}
 	c.AliveMap = &AliveMap{Alive: alive}
 	c.userEtag = r.Header().Get("ETag")
@@ -104,6 +125,149 @@ func (c *Client) GetUserAlive() (map[int]int, error) {
 		c.AliveMap.Alive = map[int]int{}
 	}
 	return c.AliveMap.Alive, nil
+}
+
+const (
+	defaultSSRMUSuffix = "microsoft.com"
+	defaultSSRMURegex  = "%5m%id.%suffix"
+)
+
+func normalizeSSRMUSettings(muSuffix, muRegex string) (string, string) {
+	muSuffix = strings.TrimSpace(muSuffix)
+	muRegex = strings.TrimSpace(muRegex)
+	if muSuffix == "" {
+		muSuffix = defaultSSRMUSuffix
+	}
+	if muRegex == "" {
+		muRegex = defaultSSRMURegex
+	}
+	return muSuffix, muRegex
+}
+
+func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, error) {
+	templateUser, err := findSSRTemplateUser(rows)
+	if err != nil {
+		return nil, nil, err
+	}
+	mode := ssrSinglePortModeFromFlag(intFromAny(templateUser.IsMultiUser))
+	if mode == "" {
+		return nil, nil, fmt.Errorf("unknown ssr single-port mode from is_multi_user=%v", templateUser.IsMultiUser)
+	}
+	muSuffix, muRegex := normalizeSSRMUSettings(c.MUSuffix, c.MURegex)
+	users := make([]UserInfo, 0, len(rows))
+	alive := make(map[int]int, len(rows))
+	for _, row := range rows {
+		if row.ID <= 0 {
+			continue
+		}
+		// is_multi_user=2 是 SSR 单端口承载用户；普通用户是 0。
+		if intFromAny(row.IsMultiUser) != 0 {
+			continue
+		}
+
+		passwd := strings.TrimSpace(row.Passwd)
+		obfsParam := strings.TrimSpace(row.ObfsParam)
+		protocolParam := ""
+		uuid := ""
+		switch mode {
+		case ssrSinglePortModeProtocol:
+			protocolParam = strings.TrimSpace(row.ProtocolParam)
+			if passwd != "" {
+				// SSR 协议式单端口：协议参数固定由 id:passwd 生成。
+				protocolParam = fmt.Sprintf("%d:%s", row.ID, passwd)
+			}
+			if protocolParam == "" {
+				continue
+			}
+			if shouldGenerateSSRObfsParam(templateUser) {
+				// SSR 混淆式单端口：按 mu_regex + mu_suffix 规则生成混淆参数。
+				obfsParam = buildSSRMultiUserObfsParam(muRegex, muSuffix, row)
+			}
+			uuid = protocolParam
+		case ssrSinglePortModeObfs:
+			if obfsParam == "" {
+				obfsParam = passwd
+			}
+			if obfsParam == "" {
+				continue
+			}
+			// 使用 id + obfsParam，确保 email 唯一且在 obfsParam 变化时可触发更新。
+			uuid = fmt.Sprintf("%d:%s", row.ID, obfsParam)
+		default:
+			return nil, nil, fmt.Errorf("unknown ssr single-port mode: %s", mode)
+		}
+
+		users = append(users, UserInfo{
+			Id:                row.ID,
+			Uuid:              uuid,
+			SpeedLimit:        intFromAny(row.NodeSpeedlimit),
+			DeviceLimit:       intFromAny(row.NodeConnector),
+			SSRClientPassword: passwd,
+			SSRProtocolParam:  protocolParam,
+			SSROBFSParam:      obfsParam,
+		})
+		alive[row.ID] = intFromAny(row.AliveIP)
+	}
+	return users, alive, nil
+}
+
+func findSSRTemplateUser(rows []modMUUserRow) (*modMUUserRow, error) {
+	for i := range rows {
+		// 优先 SSR 协议式单端口承载用户。
+		if intFromAny(rows[i].IsMultiUser) == 2 {
+			return &rows[i], nil
+		}
+	}
+	for i := range rows {
+		// 兼容 SS 混淆式单端口承载用户。
+		if intFromAny(rows[i].IsMultiUser) == 1 {
+			return &rows[i], nil
+		}
+	}
+	return nil, fmt.Errorf("ssr single-port template user not found (is_multi_user=2 or 1)")
+}
+
+const (
+	ssrSinglePortModeProtocol = "protocol"
+	ssrSinglePortModeObfs     = "obfs"
+)
+
+func ssrSinglePortModeFromFlag(v int) string {
+	switch v {
+	case 2:
+		return ssrSinglePortModeProtocol
+	case 1:
+		return ssrSinglePortModeObfs
+	default:
+		return ""
+	}
+}
+
+func shouldGenerateSSRObfsParam(templateUser *modMUUserRow) bool {
+	if templateUser == nil {
+		return false
+	}
+	obfs := strings.ToLower(strings.TrimSpace(templateUser.Obfs))
+	return obfs != "" && obfs != "plain"
+}
+
+func buildSSRMultiUserObfsParam(pattern, suffix string, row modMUUserRow) string {
+	feature := strings.TrimSpace(row.Passwd)
+	if feature == "" {
+		feature = strconv.Itoa(row.ID)
+	}
+	md5Sum := md5.Sum([]byte(feature))
+	md5Hex := hex.EncodeToString(md5Sum[:])
+	shortMD5 := md5Hex
+	if len(shortMD5) > 5 {
+		shortMD5 = shortMD5[:5]
+	}
+	param := pattern
+	param = strings.ReplaceAll(param, "%5m", shortMD5)
+	param = strings.ReplaceAll(param, "%m", md5Hex)
+	param = strings.ReplaceAll(param, "%id", strconv.Itoa(row.ID))
+	param = strings.ReplaceAll(param, "%suffix", suffix)
+	return strings.TrimSpace(param)
 }
 
 type UserTraffic struct {

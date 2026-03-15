@@ -76,7 +76,7 @@ func (c *Controller) Start(x *core.V2Core) error {
 		}
 	}
 	// Add new tag
-	err = c.server.AddNode(c.tag, node)
+	err = c.server.AddNodeWithUsers(c.tag, node, c.userList)
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}

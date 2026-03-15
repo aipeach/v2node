@@ -18,6 +18,9 @@ type Client struct {
 	NodeId           int
 	NodeType         string
 	ListenIP         string
+	MUSuffix         string
+	MURegex          string
+	SSObfsUDP        bool
 	CertConfig       *conf.CertConfig
 	GlobalCertConfig *conf.CertConfig
 	CertFile         string
@@ -35,6 +38,8 @@ type Client struct {
 }
 
 func New(c *conf.NodeConfig) (*Client, error) {
+	muSuffix, muRegex := normalizeSSRMUSettings(c.MUSuffix, c.MURegex)
+
 	client := resty.New()
 	client.SetRetryCount(3)
 	if c.Timeout > 0 {
@@ -63,6 +68,9 @@ func New(c *conf.NodeConfig) (*Client, error) {
 		NodeId:           c.NodeID,
 		NodeType:         c.NodeType,
 		ListenIP:         c.ListenIP,
+		MUSuffix:         muSuffix,
+		MURegex:          muRegex,
+		SSObfsUDP:        c.SSObfsUDP,
 		CertConfig:       c.CertConfig,
 		GlobalCertConfig: c.GlobalCertConfig,
 		CertFile:         c.CertFile,
