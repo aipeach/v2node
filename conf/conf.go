@@ -17,6 +17,7 @@ type Conf struct {
 	GlobalCertConfig        *CertConfig             `mapstructure:"GlobalCertConfig"`
 	GlobalCertFile          string                  `mapstructure:"GlobalCertFile"`
 	GlobalKeyFile           string                  `mapstructure:"GlobalKeyFile"`
+	DumpInboundsFile        string                  `mapstructure:"dump_inbounds_file"`
 	PprofPort               int                     `mapstructure:"PprofPort"`
 	SubmitAliveIPMinTraffic int                     `mapstructure:"submit_alive_ip_min_traffic"`
 	SubmitTrafficMinTraffic int                     `mapstructure:"submit_traffic_min_traffic"`
@@ -81,6 +82,7 @@ type NodeConfig struct {
 	APIHost             string `mapstructure:"ApiHost"`
 	NodeID              int
 	NodeType            string `mapstructure:"NodeType"`
+	SSRSinglePortMode   string `mapstructure:"-"`
 	Key                 string `mapstructure:"ApiKey"`
 	Timeout             int    `mapstructure:"Timeout"`
 	ListenIP            string `mapstructure:"ListenIP"`
@@ -116,6 +118,7 @@ type fileConf struct {
 	GlobalCertConfig        *CertConfig             `mapstructure:"GlobalCertConfig"`
 	GlobalCertFile          string                  `mapstructure:"GlobalCertFile"`
 	GlobalKeyFile           string                  `mapstructure:"GlobalKeyFile"`
+	DumpInboundsFile        string                  `mapstructure:"dump_inbounds_file"`
 	PprofPort               int                     `mapstructure:"PprofPort"`
 	SubmitAliveIPMinTraffic int                     `mapstructure:"submit_alive_ip_min_traffic"`
 	SubmitTrafficMinTraffic int                     `mapstructure:"submit_traffic_min_traffic"`
@@ -195,6 +198,7 @@ func (p *Conf) LoadFromPath(filePath string) error {
 		GlobalCertConfig:        p.GlobalCertConfig,
 		GlobalCertFile:          p.GlobalCertFile,
 		GlobalKeyFile:           p.GlobalKeyFile,
+		DumpInboundsFile:        p.DumpInboundsFile,
 		SubmitAliveIPMinTraffic: p.SubmitAliveIPMinTraffic,
 		SubmitTrafficMinTraffic: p.SubmitTrafficMinTraffic,
 		UserIPLimitCIDRPrefixV4: p.UserIPLimitCIDRPrefixV4,
@@ -226,6 +230,7 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	}
 	p.LogConfig = loaded.LogConfig
 	p.NodeConfigs = nodeConfigs
+	p.DumpInboundsFile = strings.TrimSpace(loaded.DumpInboundsFile)
 	p.PprofPort = loaded.PprofPort
 	p.SubmitAliveIPMinTraffic = loaded.SubmitAliveIPMinTraffic
 	p.SubmitTrafficMinTraffic = loaded.SubmitTrafficMinTraffic
@@ -283,6 +288,9 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	}
 	if p.DNS.File != "" && !filepath.IsAbs(p.DNS.File) {
 		p.DNS.File = filepath.Join(configDir, p.DNS.File)
+	}
+	if p.DumpInboundsFile != "" && !filepath.IsAbs(p.DumpInboundsFile) {
+		p.DumpInboundsFile = filepath.Join(configDir, p.DumpInboundsFile)
 	}
 	if p.GeositeFile != "" && !filepath.IsAbs(p.GeositeFile) {
 		p.GeositeFile = filepath.Join(configDir, p.GeositeFile)

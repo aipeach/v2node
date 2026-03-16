@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -128,9 +129,14 @@ func (c *Client) GetUserAlive() (map[int]int, error) {
 }
 
 const (
-	defaultSSRMUSuffix = "microsoft.com"
-	defaultSSRMURegex  = "%5m%id.%suffix"
+	defaultSSRMUSuffix        = "microsoft.com"
+	defaultSSRMURegex         = "%5m%id.%suffix"
+	SSRSinglePortModeAuto     = "auto"
+	SSRSinglePortModeProtocol = "protocol"
+	SSRSinglePortModeObfs     = "obfs"
 )
+
+var ssrHashSlicePattern = regexp.MustCompile(`%(-?\d+)m`)
 
 func normalizeSSRMUSettings(muSuffix, muRegex string) (string, string) {
 	muSuffix = strings.TrimSpace(muSuffix)
@@ -144,8 +150,68 @@ func normalizeSSRMUSettings(muSuffix, muRegex string) (string, string) {
 	return muSuffix, muRegex
 }
 
+func normalizeSSRSinglePortMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		return SSRSinglePortModeAuto
+	case "protocol":
+		return SSRSinglePortModeProtocol
+	case "obfs":
+		return SSRSinglePortModeObfs
+	default:
+		return ""
+	}
+}
+
+// GetSSRSinglePortModes returns available single-port carrier modes from mod_mu users.
+func (c *Client) GetSSRSinglePortModes() ([]string, error) {
+	if !isSSRNodeType(c.NodeType) {
+		return nil, nil
+	}
+	const path = "/mod_mu/users"
+	r, err := c.client.R().Get(path)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, fmt.Errorf("received nil response")
+	}
+	if r.StatusCode() >= 400 {
+		return nil, fmt.Errorf("get user list for ssr modes failed with status %d: %s", r.StatusCode(), string(r.Body()))
+	}
+	resp := &modMUUsersResponse{}
+	if err := json.Unmarshal(r.Body(), resp); err != nil {
+		return nil, fmt.Errorf("decode mod_mu user list error: %w", err)
+	}
+	if resp.Ret != 1 {
+		return nil, fmt.Errorf("mod_mu user list ret=%d, body=%s", resp.Ret, string(r.Body()))
+	}
+	hasProtocol := false
+	hasObfs := false
+	for _, row := range resp.Data {
+		switch intFromAny(row.IsMultiUser) {
+		case 2:
+			hasProtocol = true
+		case 1:
+			hasObfs = true
+		}
+	}
+	modes := make([]string, 0, 2)
+	if hasProtocol {
+		modes = append(modes, SSRSinglePortModeProtocol)
+	}
+	if hasObfs {
+		modes = append(modes, SSRSinglePortModeObfs)
+	}
+	return modes, nil
+}
+
 func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, error) {
-	templateUser, err := findSSRTemplateUser(rows)
+	selectedMode := normalizeSSRSinglePortMode(c.SSRSinglePortMode)
+	if selectedMode == "" {
+		_, selectedMode = parseSSRNodeType(c.NodeType)
+	}
+	templateUser, err := findSSRTemplateUser(rows, selectedMode)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -170,7 +236,7 @@ func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, er
 		protocolParam := ""
 		uuid := ""
 		switch mode {
-		case ssrSinglePortModeProtocol:
+		case SSRSinglePortModeProtocol:
 			protocolParam = strings.TrimSpace(row.ProtocolParam)
 			if passwd != "" {
 				// SSR 协议式单端口：协议参数固定由 id:passwd 生成。
@@ -179,15 +245,10 @@ func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, er
 			if protocolParam == "" {
 				continue
 			}
-			if shouldGenerateSSRObfsParam(templateUser) {
-				// SSR 混淆式单端口：按 mu_regex + mu_suffix 规则生成混淆参数。
-				obfsParam = buildSSRMultiUserObfsParam(muRegex, muSuffix, row)
-			}
 			uuid = protocolParam
-		case ssrSinglePortModeObfs:
-			if obfsParam == "" {
-				obfsParam = passwd
-			}
+		case SSRSinglePortModeObfs:
+			// SS 混淆式单端口：按 mu_regex + mu_suffix 规则生成混淆参数。
+			obfsParam = buildSSRMultiUserObfsParam(muRegex, muSuffix, row)
 			if obfsParam == "" {
 				continue
 			}
@@ -211,63 +272,86 @@ func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, er
 	return users, alive, nil
 }
 
-func findSSRTemplateUser(rows []modMUUserRow) (*modMUUserRow, error) {
-	for i := range rows {
-		// 优先 SSR 协议式单端口承载用户。
-		if intFromAny(rows[i].IsMultiUser) == 2 {
-			return &rows[i], nil
+func findSSRTemplateUser(rows []modMUUserRow, selectedMode string) (*modMUUserRow, error) {
+	findByFlag := func(flag int) *modMUUserRow {
+		for i := range rows {
+			if intFromAny(rows[i].IsMultiUser) == flag {
+				return &rows[i]
+			}
 		}
+		return nil
 	}
-	for i := range rows {
-		// 兼容 SS 混淆式单端口承载用户。
-		if intFromAny(rows[i].IsMultiUser) == 1 {
-			return &rows[i], nil
+	switch selectedMode {
+	case SSRSinglePortModeProtocol:
+		if user := findByFlag(2); user != nil {
+			return user, nil
 		}
+		return nil, fmt.Errorf("ssr protocol single-port template user not found (is_multi_user=2)")
+	case SSRSinglePortModeObfs:
+		if user := findByFlag(1); user != nil {
+			return user, nil
+		}
+		return nil, fmt.Errorf("ssr obfs single-port template user not found (is_multi_user=1)")
+	default:
+		// auto: 优先协议式，再退回混淆式。
+		if user := findByFlag(2); user != nil {
+			return user, nil
+		}
+		if user := findByFlag(1); user != nil {
+			return user, nil
+		}
+		return nil, fmt.Errorf("ssr single-port template user not found (is_multi_user=2 or 1)")
 	}
-	return nil, fmt.Errorf("ssr single-port template user not found (is_multi_user=2 or 1)")
 }
-
-const (
-	ssrSinglePortModeProtocol = "protocol"
-	ssrSinglePortModeObfs     = "obfs"
-)
 
 func ssrSinglePortModeFromFlag(v int) string {
 	switch v {
 	case 2:
-		return ssrSinglePortModeProtocol
+		return SSRSinglePortModeProtocol
 	case 1:
-		return ssrSinglePortModeObfs
+		return SSRSinglePortModeObfs
 	default:
 		return ""
 	}
 }
 
-func shouldGenerateSSRObfsParam(templateUser *modMUUserRow) bool {
-	if templateUser == nil {
-		return false
-	}
-	obfs := strings.ToLower(strings.TrimSpace(templateUser.Obfs))
-	return obfs != "" && obfs != "plain"
-}
-
 func buildSSRMultiUserObfsParam(pattern, suffix string, row modMUUserRow) string {
-	feature := strings.TrimSpace(row.Passwd)
-	if feature == "" {
-		feature = strconv.Itoa(row.ID)
-	}
+	feature := strconv.Itoa(row.ID) +
+		strings.TrimSpace(row.Passwd) +
+		strings.TrimSpace(row.Method) +
+		strings.TrimSpace(row.Obfs) +
+		strings.TrimSpace(row.Protocol)
 	md5Sum := md5.Sum([]byte(feature))
 	md5Hex := hex.EncodeToString(md5Sum[:])
-	shortMD5 := md5Hex
-	if len(shortMD5) > 5 {
-		shortMD5 = shortMD5[:5]
-	}
-	param := pattern
-	param = strings.ReplaceAll(param, "%5m", shortMD5)
+
+	param := ssrHashSlicePattern.ReplaceAllStringFunc(pattern, func(token string) string {
+		n, err := strconv.Atoi(token[1 : len(token)-1])
+		if err != nil {
+			return token
+		}
+		return sliceSSRHash(md5Hex, n)
+	})
 	param = strings.ReplaceAll(param, "%m", md5Hex)
 	param = strings.ReplaceAll(param, "%id", strconv.Itoa(row.ID))
 	param = strings.ReplaceAll(param, "%suffix", suffix)
 	return strings.TrimSpace(param)
+}
+
+func sliceSSRHash(hash string, n int) string {
+	if hash == "" || n == 0 {
+		return hash
+	}
+	if n > 0 {
+		if n >= len(hash) {
+			return hash
+		}
+		return hash[:n]
+	}
+	count := -n
+	if count >= len(hash) {
+		return hash
+	}
+	return hash[len(hash)-count:]
 }
 
 type UserTraffic struct {

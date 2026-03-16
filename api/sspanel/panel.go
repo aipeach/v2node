@@ -12,29 +12,30 @@ import (
 )
 
 type Client struct {
-	client           *resty.Client
-	APIHost          string
-	Token            string
-	NodeId           int
-	NodeType         string
-	ListenIP         string
-	MUSuffix         string
-	MURegex          string
-	SSObfsUDP        bool
-	CertConfig       *conf.CertConfig
-	GlobalCertConfig *conf.CertConfig
-	CertFile         string
-	KeyFile          string
-	AcceptProxyProto bool
-	nodeEtag         string
-	detectRuleEtag   string
-	userEtag         string
-	responseBodyHash string
-	detectRuleHash   string
-	cachedNodeData   *modMUNodeData
-	cachedRoutes     []Route
-	UserList         *UserListBody
-	AliveMap         *AliveMap
+	client            *resty.Client
+	APIHost           string
+	Token             string
+	NodeId            int
+	NodeType          string
+	SSRSinglePortMode string
+	ListenIP          string
+	MUSuffix          string
+	MURegex           string
+	SSObfsUDP         bool
+	CertConfig        *conf.CertConfig
+	GlobalCertConfig  *conf.CertConfig
+	CertFile          string
+	KeyFile           string
+	AcceptProxyProto  bool
+	nodeEtag          string
+	detectRuleEtag    string
+	userEtag          string
+	responseBodyHash  string
+	detectRuleHash    string
+	cachedNodeData    *modMUNodeData
+	cachedRoutes      []Route
+	UserList          *UserListBody
+	AliveMap          *AliveMap
 }
 
 func New(c *conf.NodeConfig) (*Client, error) {
@@ -62,21 +63,22 @@ func New(c *conf.NodeConfig) (*Client, error) {
 		"node_id": strconv.Itoa(c.NodeID),
 	})
 	return &Client{
-		client:           client,
-		Token:            c.Key,
-		APIHost:          c.APIHost,
-		NodeId:           c.NodeID,
-		NodeType:         c.NodeType,
-		ListenIP:         c.ListenIP,
-		MUSuffix:         muSuffix,
-		MURegex:          muRegex,
-		SSObfsUDP:        c.SSObfsUDP,
-		CertConfig:       c.CertConfig,
-		GlobalCertConfig: c.GlobalCertConfig,
-		CertFile:         c.CertFile,
-		KeyFile:          c.KeyFile,
-		AcceptProxyProto: c.AcceptProxyProtocol,
-		UserList:         &UserListBody{},
-		AliveMap:         &AliveMap{},
+		client:            client,
+		Token:             c.Key,
+		APIHost:           c.APIHost,
+		NodeId:            c.NodeID,
+		NodeType:          c.NodeType,
+		SSRSinglePortMode: c.SSRSinglePortMode,
+		ListenIP:          c.ListenIP,
+		MUSuffix:          muSuffix,
+		MURegex:           muRegex,
+		SSObfsUDP:         c.SSObfsUDP,
+		CertConfig:        c.CertConfig,
+		GlobalCertConfig:  c.GlobalCertConfig,
+		CertFile:          c.CertFile,
+		KeyFile:           c.KeyFile,
+		AcceptProxyProto:  c.AcceptProxyProtocol,
+		UserList:          &UserListBody{},
+		AliveMap:          &AliveMap{},
 	}, nil
 }

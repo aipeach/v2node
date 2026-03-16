@@ -219,11 +219,16 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 	if protocol == "" {
 		protocol = "vmess"
 	}
+	selectedMode := normalizeSSRSinglePortMode(client.SSRSinglePortMode)
+	isSSR := isSSRNodeType(protocol)
+	if isSSR && (selectedMode == "" || selectedMode == SSRSinglePortModeAuto) {
+		_, selectedMode = parseSSRNodeType(protocol)
+	}
 	switch {
 	case protocol == "vmess":
 		return buildModMUVmessNodeInfo(client, data, routes)
-	case isSSRNodeType(protocol):
-		return buildModMUSSRNodeInfo(client, data, routes)
+	case isSSR:
+		return buildModMUSSRNodeInfo(client, data, routes, selectedMode)
 	default:
 		return nil, fmt.Errorf("unsupported node type from config: %s", protocol)
 	}
@@ -306,8 +311,8 @@ func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route
 	return node, nil
 }
 
-func buildModMUSSRNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
-	templateUser, err := client.fetchSSRTemplateUser()
+func buildModMUSSRNodeInfo(client *Client, data *modMUNodeData, routes []Route, selectedMode string) (*NodeInfo, error) {
+	templateUser, err := client.fetchSSRTemplateUser(selectedMode)
 	if err != nil {
 		return nil, err
 	}
@@ -361,12 +366,16 @@ func buildModMUSSRNodeInfo(client *Client, data *modMUNodeData, routes []Route) 
 		Security:     None,
 		PushInterval: time.Duration(interval) * time.Second,
 		PullInterval: time.Duration(interval) * time.Second,
-		Tag:          fmt.Sprintf("[%s]-%s:%d", client.APIHost, protocol, client.NodeId),
+		Tag:          buildSSRNodeTag(client.APIHost, protocol, client.NodeId, selectedMode),
 		Common:       common,
 	}, nil
 }
 
-func (c *Client) fetchSSRTemplateUser() (*modMUUserRow, error) {
+func (c *Client) fetchSSRTemplateUser(selectedMode string) (*modMUUserRow, error) {
+	selectedMode = normalizeSSRSinglePortMode(selectedMode)
+	if selectedMode == "" {
+		selectedMode = SSRSinglePortModeAuto
+	}
 	const path = "/mod_mu/users"
 	r, err := c.client.R().Get(path)
 	if err != nil {
@@ -385,20 +394,37 @@ func (c *Client) fetchSSRTemplateUser() (*modMUUserRow, error) {
 	if resp.Ret != 1 {
 		return nil, fmt.Errorf("mod_mu user list ret=%d, body=%s", resp.Ret, string(r.Body()))
 	}
-	templateUser, err := findSSRTemplateUser(resp.Data)
+	templateUser, err := findSSRTemplateUser(resp.Data, selectedMode)
 	if err != nil {
 		return nil, err
 	}
 	return templateUser, nil
 }
 
-func isSSRNodeType(nodeType string) bool {
+func parseSSRNodeType(nodeType string) (bool, string) {
 	switch strings.ToLower(strings.TrimSpace(nodeType)) {
 	case "ssr", "shadowsocksr":
-		return true
+		return true, SSRSinglePortModeAuto
+	case "ssr-protocol", "shadowsocksr-protocol":
+		return true, SSRSinglePortModeProtocol
+	case "ssr-obfs", "shadowsocksr-obfs", "ss":
+		return true, SSRSinglePortModeObfs
 	default:
-		return false
+		return false, ""
 	}
+}
+
+func isSSRNodeType(nodeType string) bool {
+	ok, _ := parseSSRNodeType(nodeType)
+	return ok
+}
+
+func buildSSRNodeTag(apiHost, protocol string, nodeID int, selectedMode string) string {
+	selectedMode = normalizeSSRSinglePortMode(selectedMode)
+	if selectedMode == SSRSinglePortModeAuto || selectedMode == "" {
+		return fmt.Sprintf("[%s]-%s:%d", apiHost, protocol, nodeID)
+	}
+	return fmt.Sprintf("[%s]-%s-%s:%d", apiHost, protocol, selectedMode, nodeID)
 }
 
 func resolveSSRListenIP(configListenIP string, serverField string) string {

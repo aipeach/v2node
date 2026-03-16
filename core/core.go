@@ -26,14 +26,16 @@ type AddUsersParams struct {
 }
 
 type V2Core struct {
-	Config     *conf.Conf
-	ReloadCh   chan struct{}
-	access     sync.Mutex
-	Server     *core.Instance
-	users      *UserMap
-	ihm        inbound.Manager
-	ohm        outbound.Manager
-	dispatcher *dispatcher.DefaultDispatcher
+	Config          *conf.Conf
+	ReloadCh        chan struct{}
+	access          sync.Mutex
+	inboundDumpLock sync.Mutex
+	inboundDump     map[string]inboundDumpEntry
+	Server          *core.Instance
+	users           *UserMap
+	ihm             inbound.Manager
+	ohm             outbound.Manager
+	dispatcher      *dispatcher.DefaultDispatcher
 }
 
 type UserMap struct {
@@ -43,7 +45,8 @@ type UserMap struct {
 
 func New(config *conf.Conf) *V2Core {
 	core := &V2Core{
-		Config: config,
+		Config:      config,
+		inboundDump: make(map[string]inboundDumpEntry),
 		users: &UserMap{
 			uidMap: make(map[string]int),
 		},

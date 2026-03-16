@@ -47,7 +47,7 @@ func (v *V2Core) addInbound(config *core.InboundHandlerConfig) error {
 }
 
 // BuildInbound build Inbound config for different protocol
-func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) (*core.InboundHandlerConfig, error) {
+func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) (*core.InboundHandlerConfig, *coreConf.InboundDetourConfig, error) {
 	in := &coreConf.InboundDetourConfig{}
 	var err error
 	switch nodeInfo.Type {
@@ -68,17 +68,17 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 	case "anytls":
 		err = buildAnyTLS(nodeInfo, in)
 	default:
-		return nil, fmt.Errorf("unsupported node type: %s", nodeInfo.Type)
+		return nil, nil, fmt.Errorf("unsupported node type: %s", nodeInfo.Type)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Set network protocol
 	if len(nodeInfo.Common.NetworkSettings) > 0 {
 		n := &NetworkSettingsProxyProtocol{}
 		err := json.Unmarshal(nodeInfo.Common.NetworkSettings, n)
 		if err != nil {
-			return nil, fmt.Errorf("unmarshal network settings error: %s", err)
+			return nil, nil, fmt.Errorf("unmarshal network settings error: %s", err)
 		}
 		if n.AcceptProxyProtocol {
 			if in.StreamSetting == nil {
@@ -118,7 +118,7 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 	switch nodeInfo.Security {
 	case panel.Tls:
 		if nodeInfo.Common.CertInfo == nil {
-			return nil, errors.New("the CertInfo is not vail")
+			return nil, nil, errors.New("the CertInfo is not vail")
 		}
 		certs := make([]*coreConf.TLSCertConfig, 0, 1+len(nodeInfo.Common.ExtraCertInfos))
 		seen := map[string]struct{}{}
@@ -152,7 +152,7 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 			dest,
 			v.TlsSettings.ServerPort))
 		if err != nil {
-			return nil, fmt.Errorf("marshal reality dest error: %s", err)
+			return nil, nil, fmt.Errorf("marshal reality dest error: %s", err)
 		}
 		in.StreamSetting.REALITYSettings = &coreConf.REALITYConfig{
 			Dest:        d,
@@ -167,7 +167,11 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 		break
 	}
 	in.Tag = tag
-	return in.Build()
+	built, err := in.Build()
+	if err != nil {
+		return nil, nil, err
+	}
+	return built, in, nil
 }
 
 func appendTLSCert(certs []*coreConf.TLSCertConfig, seen map[string]struct{}, certInfo *panel.CertInfo) []*coreConf.TLSCertConfig {
