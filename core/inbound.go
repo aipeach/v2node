@@ -58,7 +58,7 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 	case "trojan":
 		err = buildTrojan(nodeInfo, in)
 	case "shadowsocks":
-		err = buildShadowsocks(nodeInfo, in)
+		err = buildShadowsocks(nodeInfo, in, tag, users)
 	case "shadowsocksr":
 		err = buildShadowsocksR(nodeInfo, in, tag, users)
 	case "hysteria2":
@@ -359,9 +359,66 @@ type ShadowsocksHTTPNetworkSettings struct {
 	Host                string `json:"Host"`
 }
 
-func buildShadowsocks(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
+type ShadowsocksSinglePortUserSettings struct {
+	Cipher   string `json:"method,omitempty"`
+	Password string `json:"password"`
+	Email    string `json:"email,omitempty"`
+}
+
+type ShadowsocksSinglePortServerSettings struct {
+	Cipher      string                              `json:"method"`
+	Password    string                              `json:"password,omitempty"`
+	Users       []ShadowsocksSinglePortUserSettings `json:"clients"`
+	NetworkList *coreConf.NetworkList               `json:"network"`
+}
+
+func buildShadowsocks(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig, tag string, users []panel.UserInfo) error {
 	inbound.Protocol = "shadowsocks"
 	s := nodeInfo.Common
+	if s.SSSinglePortMultiUser {
+		settings := &ShadowsocksSinglePortServerSettings{
+			Cipher:      s.Cipher,
+			NetworkList: &coreConf.NetworkList{"tcp", "udp"},
+			Users:       make([]ShadowsocksSinglePortUserSettings, 0, len(users)),
+		}
+
+		if isShadowsocks2022Cipher(s.Cipher) {
+			settings.Password = strings.TrimSpace(s.ServerKey)
+			if settings.Password == "" {
+				return fmt.Errorf("shadowsocks 2022 single-port mode requires carrier password in server_key")
+			}
+		}
+
+		for i := range users {
+			clientPassword := strings.TrimSpace(users[i].SSClientPassword)
+			if clientPassword == "" {
+				clientPassword = strings.TrimSpace(users[i].Uuid)
+			}
+			if clientPassword == "" {
+				continue
+			}
+			userConfig := ShadowsocksSinglePortUserSettings{
+				Email:    format.UserTag(tag, users[i].Uuid),
+				Password: clientPassword,
+			}
+			if !isShadowsocks2022Cipher(s.Cipher) {
+				userConfig.Cipher = s.Cipher
+			}
+			settings.Users = append(settings.Users, userConfig)
+		}
+
+		if len(settings.Users) == 0 {
+			return fmt.Errorf("shadowsocks single-port multi-user requires at least one client user")
+		}
+
+		sets, err := json.Marshal(settings)
+		if err != nil {
+			return fmt.Errorf("marshal shadowsocks settings error: %s", err)
+		}
+		inbound.Settings = (*json.RawMessage)(&sets)
+		return nil
+	}
+
 	settings := &coreConf.ShadowsocksServerConfig{
 		Cipher: s.Cipher,
 	}
@@ -435,6 +492,15 @@ func buildShadowsocks(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourC
 		return fmt.Errorf("marshal shadowsocks settings error: %s", err)
 	}
 	return nil
+}
+
+func isShadowsocks2022Cipher(cipher string) bool {
+	switch strings.ToLower(strings.TrimSpace(cipher)) {
+	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305":
+		return true
+	default:
+		return false
+	}
 }
 
 func buildShadowsocksR(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig, tag string, users []panel.UserInfo) error {

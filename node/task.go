@@ -127,13 +127,21 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		return nil
 	}
 	deleted, added := compareUserList(c.userList, newU)
-	if c.info != nil && c.info.Type == "shadowsocksr" && (len(added) > 0 || len(deleted) > 0) {
+	needReloadOnUserChange := false
+	if c.info != nil {
+		if c.info.Type == "shadowsocksr" {
+			needReloadOnUserChange = true
+		} else if c.info.Type == "shadowsocks" && c.info.Common != nil && c.info.Common.SSSinglePortMultiUser {
+			needReloadOnUserChange = true
+		}
+	}
+	if needReloadOnUserChange && (len(added) > 0 || len(deleted) > 0) {
 		log.WithFields(log.Fields{
 			"tag":      c.tag,
 			"added":    len(added),
 			"deleted":  len(deleted),
 			"nodeType": c.info.Type,
-		}).Info("SSR user list changed, trigger reload")
+		}).Info("single-port user list changed, trigger reload")
 		if c.server.ReloadCh != nil {
 			select {
 			case c.server.ReloadCh <- struct{}{}:

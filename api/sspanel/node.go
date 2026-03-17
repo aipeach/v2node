@@ -49,8 +49,9 @@ type CommonNode struct {
 	ServerName         string          `json:"server_name"`
 	Flow               string          `json:"flow"`
 	//shadowsocks
-	Cipher    string `json:"cipher"`
-	ServerKey string `json:"server_key"`
+	Cipher                string `json:"cipher"`
+	ServerKey             string `json:"server_key"`
+	SSSinglePortMultiUser bool   `json:"ss_single_port_multi_user"`
 	//shadowsocksr
 	SSRMethod        string `json:"ssr_method"`
 	SSRPassword      string `json:"ssr_password"`
@@ -227,11 +228,75 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 	switch {
 	case protocol == "vmess":
 		return buildModMUVmessNodeInfo(client, data, routes)
+	case isShadowsocksNodeType(protocol):
+		return buildModMUShadowsocksNodeInfo(client, data, routes)
 	case isSSR:
 		return buildModMUSSRNodeInfo(client, data, routes, selectedMode)
 	default:
 		return nil, fmt.Errorf("unsupported node type from config: %s", protocol)
 	}
+}
+
+func buildModMUShadowsocksNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
+	templateUser, err := client.fetchShadowsocksTemplateUser()
+	if err != nil {
+		return nil, err
+	}
+
+	serverPort := intFromAny(templateUser.Port)
+	if serverPort <= 0 {
+		return nil, fmt.Errorf("invalid shadowsocks template user port: %v", templateUser.Port)
+	}
+
+	method := normalizeShadowsocksMethod(templateUser.Method)
+	if method == "" {
+		return nil, fmt.Errorf("shadowsocks template user method is empty")
+	}
+	if !isShadowsocksSinglePortAEADMethod(method) {
+		return nil, fmt.Errorf("unsupported shadowsocks single-port method: %s", method)
+	}
+
+	password := strings.TrimSpace(templateUser.Passwd)
+	if isShadowsocks2022Method(method) && password == "" {
+		return nil, fmt.Errorf("shadowsocks 2022 single-port template user password is empty")
+	}
+
+	interval := data.DisconnectTime
+	if interval <= 0 {
+		interval = 60
+	}
+
+	listenIP := resolveSSRListenIP(client.ListenIP, data.Server)
+	serverKey := ""
+	if isShadowsocks2022Method(method) {
+		serverKey = password
+	}
+
+	common := &CommonNode{
+		Protocol:              "shadowsocks",
+		ListenIP:              listenIP,
+		ServerPort:            serverPort,
+		Routes:                cloneRoutes(routes),
+		Cipher:                method,
+		ServerKey:             serverKey,
+		SSSinglePortMultiUser: true,
+		BaseConfig: &BaseConfig{
+			PushInterval:           interval,
+			PullInterval:           interval,
+			DeviceOnlineMinTraffic: 0,
+			NodeReportMinTraffic:   0,
+		},
+	}
+
+	return &NodeInfo{
+		Id:           client.NodeId,
+		Type:         "shadowsocks",
+		Security:     None,
+		PushInterval: time.Duration(interval) * time.Second,
+		PullInterval: time.Duration(interval) * time.Second,
+		Tag:          fmt.Sprintf("[%s]-%s:%d", client.APIHost, "shadowsocks", client.NodeId),
+		Common:       common,
+	}, nil
 }
 
 func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
@@ -401,6 +466,34 @@ func (c *Client) fetchSSRTemplateUser(selectedMode string) (*modMUUserRow, error
 	return templateUser, nil
 }
 
+func (c *Client) fetchShadowsocksTemplateUser() (*modMUUserRow, error) {
+	const path = "/mod_mu/users"
+	r, err := c.client.R().Get(path)
+	if err != nil {
+		return nil, err
+	}
+	if r == nil {
+		return nil, fmt.Errorf("received nil response")
+	}
+	if r.StatusCode() >= 400 {
+		return nil, fmt.Errorf("get user list for shadowsocks node failed with status %d: %s", r.StatusCode(), string(r.Body()))
+	}
+
+	resp := &modMUUsersResponse{}
+	if err := json.Unmarshal(r.Body(), resp); err != nil {
+		return nil, fmt.Errorf("decode mod_mu user list error: %w", err)
+	}
+	if resp.Ret != 1 {
+		return nil, fmt.Errorf("mod_mu user list ret=%d, body=%s", resp.Ret, string(r.Body()))
+	}
+
+	templateUser, err := findShadowsocksTemplateUser(resp.Data)
+	if err != nil {
+		return nil, err
+	}
+	return templateUser, nil
+}
+
 func parseSSRNodeType(nodeType string) (bool, string) {
 	switch strings.ToLower(strings.TrimSpace(nodeType)) {
 	case "ssr", "shadowsocksr":
@@ -417,6 +510,10 @@ func parseSSRNodeType(nodeType string) (bool, string) {
 func isSSRNodeType(nodeType string) bool {
 	ok, _ := parseSSRNodeType(nodeType)
 	return ok
+}
+
+func isShadowsocksNodeType(nodeType string) bool {
+	return strings.EqualFold(strings.TrimSpace(nodeType), "shadowsocks")
 }
 
 func buildSSRNodeTag(apiHost, protocol string, nodeID int, selectedMode string) string {

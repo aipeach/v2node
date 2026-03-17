@@ -80,15 +80,19 @@ func (c *Controller) Start(x *core.V2Core) error {
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}
-	added, err := c.server.AddUsers(&core.AddUsersParams{
-		Tag:      c.tag,
-		Users:    c.userList,
-		NodeInfo: node,
-	})
-	if err != nil {
-		return fmt.Errorf("add users error: %s", err)
+	if node.Type == "shadowsocks" && node.Common != nil && node.Common.SSSinglePortMultiUser {
+		log.WithField("tag", c.tag).Info("Shadowsocks single-port multi-user: users are embedded in inbound settings, skip initial AddUsers")
+	} else {
+		added, err := c.server.AddUsers(&core.AddUsersParams{
+			Tag:      c.tag,
+			Users:    c.userList,
+			NodeInfo: node,
+		})
+		if err != nil {
+			return fmt.Errorf("add users error: %s", err)
+		}
+		log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	}
-	log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	c.info = node
 	c.dynamicLimit, err = newDynamicLimitRuntime(c.server.Config)
 	if err != nil {

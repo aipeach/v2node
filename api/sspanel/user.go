@@ -20,6 +20,7 @@ type UserInfo struct {
 	Uuid              string `json:"uuid" msgpack:"uuid"`
 	SpeedLimit        int    `json:"speed_limit" msgpack:"speed_limit"`
 	DeviceLimit       int    `json:"device_limit" msgpack:"device_limit"`
+	SSClientPassword  string `json:"-" msgpack:"-"`
 	SSRClientPassword string `json:"-" msgpack:"-"`
 	SSRProtocolParam  string `json:"-" msgpack:"-"`
 	SSROBFSParam      string `json:"-" msgpack:"-"`
@@ -91,6 +92,12 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 	if isSSRNodeType(c.NodeType) {
 		var err error
 		users, alive, err = c.buildSSRUsers(resp.Data)
+		if err != nil {
+			return nil, err
+		}
+	} else if isShadowsocksNodeType(c.NodeType) {
+		var err error
+		users, alive, err = c.buildShadowsocksUsers(resp.Data)
 		if err != nil {
 			return nil, err
 		}
@@ -209,6 +216,40 @@ func (c *Client) GetSSRSinglePortModes() ([]string, error) {
 	return modes, nil
 }
 
+func (c *Client) buildShadowsocksUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, error) {
+	if _, err := findShadowsocksTemplateUser(rows); err != nil {
+		return nil, nil, err
+	}
+
+	users := make([]UserInfo, 0, len(rows))
+	alive := make(map[int]int, len(rows))
+	for _, row := range rows {
+		if row.ID <= 0 {
+			continue
+		}
+		if intFromAny(row.IsMultiUser) != 0 {
+			continue
+		}
+
+		passwd := strings.TrimSpace(row.Passwd)
+		if passwd == "" {
+			continue
+		}
+
+		// Use id:passwd to ensure uniqueness and detect password updates.
+		uuid := fmt.Sprintf("%d:%s", row.ID, passwd)
+		users = append(users, UserInfo{
+			Id:               row.ID,
+			Uuid:             uuid,
+			SpeedLimit:       intFromAny(row.NodeSpeedlimit),
+			DeviceLimit:      intFromAny(row.NodeConnector),
+			SSClientPassword: passwd,
+		})
+		alive[row.ID] = intFromAny(row.AliveIP)
+	}
+	return users, alive, nil
+}
+
 func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, error) {
 	selectedMode := normalizeSSRSinglePortMode(c.SSRSinglePortMode)
 	if selectedMode == "" {
@@ -324,6 +365,66 @@ func isFilteredSSRObfsSinglePortTemplate(row modMUUserRow) bool {
 	proto := strings.ToLower(strings.TrimSpace(row.Protocol))
 	obfs := strings.ToLower(strings.TrimSpace(row.Obfs))
 	return proto == "origin" && obfs == "plain"
+}
+
+func findShadowsocksTemplateUser(rows []modMUUserRow) (*modMUUserRow, error) {
+	for i := range rows {
+		if isShadowsocksSinglePortTemplate(rows[i]) {
+			return &rows[i], nil
+		}
+	}
+	return nil, fmt.Errorf("shadowsocks single-port template user not found (is_multi_user=1 with aead method + protocol=origin + obfs=plain)")
+}
+
+func isShadowsocksSinglePortTemplate(row modMUUserRow) bool {
+	if intFromAny(row.IsMultiUser) != 1 {
+		return false
+	}
+	method := normalizeShadowsocksMethod(row.Method)
+	if !isShadowsocksSinglePortAEADMethod(method) {
+		return false
+	}
+	proto := strings.ToLower(strings.TrimSpace(row.Protocol))
+	obfs := strings.ToLower(strings.TrimSpace(row.Obfs))
+	return proto == "origin" && obfs == "plain"
+}
+
+func normalizeShadowsocksMethod(method string) string {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "aead_aes_128_gcm":
+		return "aes-128-gcm"
+	case "aead_aes_192_gcm":
+		return "aes-192-gcm"
+	case "aead_aes_256_gcm":
+		return "aes-256-gcm"
+	case "chacha20-poly1305", "aead_chacha20_poly1305":
+		return "chacha20-ietf-poly1305"
+	default:
+		return strings.ToLower(strings.TrimSpace(method))
+	}
+}
+
+func isShadowsocksSinglePortAEADMethod(method string) bool {
+	switch normalizeShadowsocksMethod(method) {
+	case "aes-128-gcm",
+		"aes-192-gcm",
+		"aes-256-gcm",
+		"chacha20-ietf-poly1305",
+		"2022-blake3-aes-128-gcm",
+		"2022-blake3-aes-256-gcm":
+		return true
+	default:
+		return false
+	}
+}
+
+func isShadowsocks2022Method(method string) bool {
+	switch normalizeShadowsocksMethod(method) {
+	case "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm":
+		return true
+	default:
+		return false
+	}
 }
 
 func ssrSinglePortModeFromFlag(v int) string {
