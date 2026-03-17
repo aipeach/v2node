@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 
 	"github.com/go-acme/lego/v4/certificate"
+	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/challenge/http01"
 	"github.com/go-acme/lego/v4/challenge/tlsalpn01"
 	"github.com/go-acme/lego/v4/providers/dns"
@@ -31,6 +32,8 @@ type Lego struct {
 	client *lego.Client
 	config *panel.CertInfo
 }
+
+const defaultDNSPropagationWait = 30 * time.Second
 
 func NewLego(config *panel.CertInfo) (*Lego, error) {
 	user, err := NewLegoUser(path.Join(path.Dir(config.CertFile),
@@ -104,7 +107,7 @@ func (l *Lego) SetProvider() error {
 		if err != nil {
 			return fmt.Errorf("create dns challenge provider error: %s", err)
 		}
-		err = l.client.Challenge.SetDNS01Provider(p)
+		err = l.client.Challenge.SetDNS01Provider(p, dns01.PropagationWait(defaultDNSPropagationWait, true))
 		if err != nil {
 			return fmt.Errorf("set dns provider error: %s", err)
 		}
