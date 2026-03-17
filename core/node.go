@@ -221,19 +221,12 @@ func sanitizeClientParams(m map[string]interface{}) {
 		}
 		normalizeAliasField(client, "protocolParam", "protocolparam")
 		normalizeAliasField(client, "obfsParam", "obfsparam")
-		out := make(map[string]interface{}, 2)
-		if v, ok := client["protocolParam"].(string); ok {
-			v = strings.TrimSpace(v)
-			if v != "" {
-				out["protocolParam"] = v
-			}
-		}
-		if v, ok := client["obfsParam"].(string); ok {
-			v = strings.TrimSpace(v)
-			if v != "" {
-				out["obfsParam"] = v
-			}
-		}
+		out := make(map[string]interface{}, 5)
+		copyNonEmptyStringField(client, out, "protocolParam")
+		copyNonEmptyStringField(client, out, "obfsParam")
+		copyNonEmptyStringField(client, out, "password")
+		copyNonEmptyStringField(client, out, "method")
+		copyNonEmptyStringField(client, out, "email")
 		if len(out) > 0 {
 			filtered = append(filtered, out)
 		}
@@ -243,6 +236,21 @@ func sanitizeClientParams(m map[string]interface{}) {
 		return
 	}
 	m["clients"] = filtered
+}
+
+func copyNonEmptyStringField(src, dst map[string]interface{}, field string) {
+	if src == nil || dst == nil {
+		return
+	}
+	v, ok := src[field].(string)
+	if !ok {
+		return
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return
+	}
+	dst[field] = v
 }
 
 func normalizeAliasField(m map[string]interface{}, canonical, alias string) {
