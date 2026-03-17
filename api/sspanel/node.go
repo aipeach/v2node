@@ -870,7 +870,7 @@ func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, n
 	keyFile := strings.TrimSpace(endpoint.ExtraParams["key_file"])
 	keyType := strings.ToLower(strings.TrimSpace(endpoint.ExtraParams["key_type"]))
 	provider := strings.TrimSpace(endpoint.ExtraParams["provider"])
-	email := firstNonEmpty(endpoint.ExtraParams["email"], "node@sspanel.local")
+	email := strings.TrimSpace(endpoint.ExtraParams["email"])
 	dnsEnv := parseDNSEnv(strings.TrimSpace(endpoint.ExtraParams["dns_env"]))
 	rejectUnknownSni := parseBool(endpoint.ExtraParams["reject_unknown_sni"])
 
@@ -1032,9 +1032,6 @@ func resolveGlobalCertInfo(client *Client, defaultDomain string) *CertInfo {
 		dnsEnv[key] = strings.TrimSpace(v)
 	}
 	email := strings.TrimSpace(global.Email)
-	if email == "" {
-		email = "node@sspanel.local"
-	}
 	return &CertInfo{
 		CertMode:         certMode,
 		CertFile:         certFile,
