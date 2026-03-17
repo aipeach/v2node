@@ -193,6 +193,9 @@ func (c *Client) GetSSRSinglePortModes() ([]string, error) {
 		case 2:
 			hasProtocol = true
 		case 1:
+			if isFilteredSSRObfsSinglePortTemplate(row) {
+				continue
+			}
 			hasObfs = true
 		}
 	}
@@ -273,35 +276,54 @@ func (c *Client) buildSSRUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, er
 }
 
 func findSSRTemplateUser(rows []modMUUserRow, selectedMode string) (*modMUUserRow, error) {
-	findByFlag := func(flag int) *modMUUserRow {
+	findByFlag := func(flag int, accept func(modMUUserRow) bool) *modMUUserRow {
 		for i := range rows {
-			if intFromAny(rows[i].IsMultiUser) == flag {
-				return &rows[i]
+			if intFromAny(rows[i].IsMultiUser) != flag {
+				continue
 			}
+			if accept != nil && !accept(rows[i]) {
+				continue
+			}
+			return &rows[i]
 		}
 		return nil
 	}
+	acceptAny := func(_ modMUUserRow) bool {
+		return true
+	}
+	acceptObfsTemplate := func(row modMUUserRow) bool {
+		return !isFilteredSSRObfsSinglePortTemplate(row)
+	}
 	switch selectedMode {
 	case SSRSinglePortModeProtocol:
-		if user := findByFlag(2); user != nil {
+		if user := findByFlag(2, acceptAny); user != nil {
 			return user, nil
 		}
 		return nil, fmt.Errorf("ssr protocol single-port template user not found (is_multi_user=2)")
 	case SSRSinglePortModeObfs:
-		if user := findByFlag(1); user != nil {
+		if user := findByFlag(1, acceptObfsTemplate); user != nil {
 			return user, nil
 		}
-		return nil, fmt.Errorf("ssr obfs single-port template user not found (is_multi_user=1)")
+		return nil, fmt.Errorf("ssr obfs single-port template user not found (is_multi_user=1, excluding protocol=origin obfs=plain)")
 	default:
 		// auto: 优先协议式，再退回混淆式。
-		if user := findByFlag(2); user != nil {
+		if user := findByFlag(2, acceptAny); user != nil {
 			return user, nil
 		}
-		if user := findByFlag(1); user != nil {
+		if user := findByFlag(1, acceptObfsTemplate); user != nil {
 			return user, nil
 		}
-		return nil, fmt.Errorf("ssr single-port template user not found (is_multi_user=2 or 1)")
+		return nil, fmt.Errorf("ssr single-port template user not found (is_multi_user=2 or valid is_multi_user=1)")
 	}
+}
+
+func isFilteredSSRObfsSinglePortTemplate(row modMUUserRow) bool {
+	if intFromAny(row.IsMultiUser) != 1 {
+		return false
+	}
+	proto := strings.ToLower(strings.TrimSpace(row.Protocol))
+	obfs := strings.ToLower(strings.TrimSpace(row.Obfs))
+	return proto == "origin" && obfs == "plain"
 }
 
 func ssrSinglePortModeFromFlag(v int) string {
