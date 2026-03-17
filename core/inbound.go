@@ -223,9 +223,20 @@ func buildVLess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig)
 			return fmt.Errorf("vless decryption method %s is not support", nodeInfo.Common.Encryption)
 		}
 	}
-	s, err := json.Marshal(&coreConf.VLessInboundConfig{
+	settings := &coreConf.VLessInboundConfig{
 		Decryption: decryption,
-	})
+	}
+	if v.EnableFallback {
+		if decryption != "none" {
+			return fmt.Errorf("vless fallback requires decryption to be none")
+		}
+		fallbacks, err := buildVLessInboundFallbacks(v.FallbackObject)
+		if err != nil {
+			return err
+		}
+		settings.Fallbacks = fallbacks
+	}
+	s, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("marshal vless config error: %s", err)
 	}
@@ -317,7 +328,15 @@ func buildVMess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig)
 func buildTrojan(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
 	inbound.Protocol = "trojan"
 	v := nodeInfo.Common
-	s, err := json.Marshal(&coreConf.TrojanServerConfig{})
+	settings := &coreConf.TrojanServerConfig{}
+	if v.EnableFallback {
+		fallbacks, err := buildTrojanInboundFallbacks(v.FallbackObject)
+		if err != nil {
+			return err
+		}
+		settings.Fallbacks = fallbacks
+	}
+	s, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("marshal trojan settings error: %s", err)
 	}
@@ -351,6 +370,76 @@ func buildTrojan(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig
 		return errors.New("the network type is not vail")
 	}
 	return nil
+}
+
+func buildVLessInboundFallbacks(fb *panel.FallbackObject) ([]*coreConf.VLessInboundFallback, error) {
+	spec, err := normalizeInboundFallbackObject(fb)
+	if err != nil {
+		return nil, err
+	}
+	return []*coreConf.VLessInboundFallback{
+		{
+			Name: spec.Name,
+			Alpn: spec.Alpn,
+			Path: spec.Path,
+			Dest: spec.Dest,
+			Xver: spec.Xver,
+		},
+	}, nil
+}
+
+func buildTrojanInboundFallbacks(fb *panel.FallbackObject) ([]*coreConf.TrojanInboundFallback, error) {
+	spec, err := normalizeInboundFallbackObject(fb)
+	if err != nil {
+		return nil, err
+	}
+	return []*coreConf.TrojanInboundFallback{
+		{
+			Name: spec.Name,
+			Alpn: spec.Alpn,
+			Path: spec.Path,
+			Dest: spec.Dest,
+			Xver: spec.Xver,
+		},
+	}, nil
+}
+
+type inboundFallbackObject struct {
+	Name string
+	Alpn string
+	Path string
+	Dest json.RawMessage
+	Xver uint64
+}
+
+func normalizeInboundFallbackObject(fb *panel.FallbackObject) (*inboundFallbackObject, error) {
+	out := &inboundFallbackObject{
+		Dest: json.RawMessage("80"),
+		Xver: 0,
+	}
+	if fb != nil {
+		out.Name = strings.TrimSpace(fb.Name)
+		out.Alpn = strings.TrimSpace(fb.Alpn)
+		out.Path = strings.TrimSpace(fb.Path)
+		dest := fb.Dest
+		if dest <= 0 {
+			dest = 80
+		}
+		rawDest, err := json.Marshal(dest)
+		if err != nil {
+			return nil, fmt.Errorf("marshal fallback dest error: %w", err)
+		}
+		out.Dest = rawDest
+		if fb.Xver < 0 || fb.Xver > 2 {
+			return nil, fmt.Errorf("invalid fallback xver: %d", fb.Xver)
+		}
+		out.Xver = uint64(fb.Xver)
+	}
+
+	if out.Path != "" && !strings.HasPrefix(out.Path, "/") {
+		return nil, fmt.Errorf("invalid fallback path %q: must start with /", out.Path)
+	}
+	return out, nil
 }
 
 type ShadowsocksHTTPNetworkSettings struct {

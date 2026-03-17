@@ -19,3 +19,4 @@ type BaseConfig = ss.BaseConfig
 type TlsSettings = ss.TlsSettings
 type CertInfo = ss.CertInfo
 type EncSettings = ss.EncSettings
+type FallbackObject = ss.FallbackObject

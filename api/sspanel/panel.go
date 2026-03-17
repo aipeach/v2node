@@ -3,6 +3,7 @@ package panel
 import (
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -22,6 +23,8 @@ type Client struct {
 	MUSuffix          string
 	MURegex           string
 	SSObfsUDP         bool
+	EnableFallback    bool
+	FallbackObject    *FallbackObject
 	CertConfig        *conf.CertConfig
 	GlobalCertConfig  *conf.CertConfig
 	CertFile          string
@@ -73,6 +76,8 @@ func New(c *conf.NodeConfig) (*Client, error) {
 		MUSuffix:          muSuffix,
 		MURegex:           muRegex,
 		SSObfsUDP:         c.SSObfsUDP,
+		EnableFallback:    c.EnableFallback,
+		FallbackObject:    clonePanelFallbackObject(c.FallbackObject),
 		CertConfig:        c.CertConfig,
 		GlobalCertConfig:  c.GlobalCertConfig,
 		CertFile:          c.CertFile,
@@ -81,4 +86,17 @@ func New(c *conf.NodeConfig) (*Client, error) {
 		UserList:          &UserListBody{},
 		AliveMap:          &AliveMap{},
 	}, nil
+}
+
+func clonePanelFallbackObject(src *conf.FallbackObject) *FallbackObject {
+	if src == nil {
+		return nil
+	}
+	return &FallbackObject{
+		Name: strings.TrimSpace(src.Name),
+		Alpn: strings.TrimSpace(src.Alpn),
+		Path: strings.TrimSpace(src.Path),
+		Dest: src.Dest,
+		Xver: src.Xver,
+	}
 }

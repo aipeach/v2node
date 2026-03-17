@@ -48,6 +48,8 @@ type CommonNode struct {
 	EncryptionSettings EncSettings     `json:"encryption_settings"`
 	ServerName         string          `json:"server_name"`
 	Flow               string          `json:"flow"`
+	EnableFallback     bool            `json:"enable_fallback"`
+	FallbackObject     *FallbackObject `json:"fallback_object"`
 	//shadowsocks
 	Cipher                string `json:"cipher"`
 	ServerKey             string `json:"server_key"`
@@ -125,6 +127,14 @@ type EncSettings struct {
 	PrivateKey    string `json:"private_key"`
 }
 
+type FallbackObject struct {
+	Name string `json:"name"`
+	Alpn string `json:"alpn"`
+	Path string `json:"path"`
+	Dest int    `json:"dest"`
+	Xver int    `json:"xver"`
+}
+
 type modMUNodeInfoResponse struct {
 	Ret  int            `json:"ret"`
 	Data *modMUNodeData `json:"data"`
@@ -151,6 +161,15 @@ type vmessEndpoint struct {
 	Host         string
 	ServerName   string
 	ExtraParams  map[string]string
+}
+
+type trojanEndpoint struct {
+	ListenIP    string
+	ListenPort  int
+	ConnectHost string
+	ConnectPort int
+	ServerName  string
+	ExtraParams map[string]string
 }
 
 func (c *Client) GetNodeInfo() (*NodeInfo, error) {
@@ -226,8 +245,10 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 		_, selectedMode = parseSSRNodeType(protocol)
 	}
 	switch {
-	case protocol == "vmess":
-		return buildModMUVmessNodeInfo(client, data, routes)
+	case protocol == "vmess" || protocol == "vless":
+		return buildModMUVmessNodeInfo(client, data, routes, protocol)
+	case protocol == "trojan":
+		return buildModMUTrojanNodeInfo(client, data, routes)
 	case isShadowsocksNodeType(protocol):
 		return buildModMUShadowsocksNodeInfo(client, data, routes)
 	case isSSR:
@@ -299,9 +320,8 @@ func buildModMUShadowsocksNodeInfo(client *Client, data *modMUNodeData, routes [
 	}, nil
 }
 
-func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
+func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route, protocol string) (*NodeInfo, error) {
 	nodeID := client.NodeId
-	protocol := "vmess"
 	endpoint, err := parseVMessEndpoint(data.Server)
 	if err != nil {
 		return nil, fmt.Errorf("parse node server field failed: %w", err)
@@ -341,6 +361,15 @@ func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route
 		},
 	}
 
+	if protocol == "vless" && client.EnableFallback {
+		fb, err := buildNodeFallbackObject(client.FallbackObject)
+		if err != nil {
+			return nil, err
+		}
+		common.EnableFallback = true
+		common.FallbackObject = fb
+	}
+
 	node := &NodeInfo{
 		Id:           nodeID,
 		Type:         protocol,
@@ -374,6 +403,84 @@ func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route
 	}
 
 	return node, nil
+}
+
+func buildModMUTrojanNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
+	nodeID := client.NodeId
+	protocol := "trojan"
+
+	endpoint, err := parseTrojanEndpoint(data.Server)
+	if err != nil {
+		return nil, fmt.Errorf("parse trojan server field failed: %w", err)
+	}
+
+	interval := data.DisconnectTime
+	if interval <= 0 {
+		interval = 60
+	}
+
+	listenIP := endpoint.ListenIP
+	if strings.TrimSpace(client.ListenIP) != "" {
+		listenIP = strings.TrimSpace(client.ListenIP)
+	}
+
+	networkSettings, err := buildProxyProtocolNetworkSettings(client.AcceptProxyProto)
+	if err != nil {
+		return nil, err
+	}
+
+	certInfo := resolveTrojanCertInfo(endpoint, client, protocol, nodeID)
+	common := &CommonNode{
+		Protocol:        protocol,
+		ListenIP:        listenIP,
+		ServerPort:      endpoint.ListenPort,
+		Routes:          cloneRoutes(routes),
+		Network:         "tcp",
+		NetworkSettings: networkSettings,
+		Tls:             Tls,
+		TlsSettings: TlsSettings{
+			ServerName:       certInfo.CertDomain,
+			CertMode:         certInfo.CertMode,
+			CertFile:         certInfo.CertFile,
+			KeyFile:          certInfo.KeyFile,
+			KeyType:          certInfo.KeyType,
+			Provider:         certInfo.Provider,
+			DNSEnv:           dnsEnvToString(certInfo.DNSEnv),
+			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
+		},
+		CertInfo: certInfo,
+		BaseConfig: &BaseConfig{
+			PushInterval:           interval,
+			PullInterval:           interval,
+			DeviceOnlineMinTraffic: 0,
+			NodeReportMinTraffic:   0,
+		},
+	}
+
+	if client.EnableFallback {
+		fb, err := buildNodeFallbackObject(client.FallbackObject)
+		if err != nil {
+			return nil, err
+		}
+		common.EnableFallback = true
+		common.FallbackObject = fb
+	}
+
+	if globalCertInfo := resolveGlobalCertInfo(client, certInfo.CertDomain); globalCertInfo != nil {
+		if !sameCertPair(certInfo, globalCertInfo) {
+			common.ExtraCertInfos = append(common.ExtraCertInfos, globalCertInfo)
+		}
+	}
+
+	return &NodeInfo{
+		Id:           nodeID,
+		Type:         protocol,
+		Security:     Tls,
+		PushInterval: time.Duration(interval) * time.Second,
+		PullInterval: time.Duration(interval) * time.Second,
+		Tag:          fmt.Sprintf("[%s]-%s:%d", client.APIHost, protocol, nodeID),
+		Common:       common,
+	}, nil
 }
 
 func buildModMUSSRNodeInfo(client *Client, data *modMUNodeData, routes []Route, selectedMode string) (*NodeInfo, error) {
@@ -578,6 +685,87 @@ func parseVMessEndpoint(server string) (*vmessEndpoint, error) {
 	}, nil
 }
 
+func parseTrojanEndpoint(server string) (*trojanEndpoint, error) {
+	parts := strings.SplitN(strings.TrimSpace(server), ";", 2)
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid trojan server format: %s", server)
+	}
+
+	connectHost := strings.TrimSpace(parts[0])
+	if connectHost == "" {
+		return nil, fmt.Errorf("trojan connect host is empty")
+	}
+
+	segments := strings.Split(strings.TrimSpace(parts[1]), "|")
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("trojan server parameters are empty")
+	}
+
+	portSegment := strings.TrimSpace(segments[0])
+	if !strings.HasPrefix(strings.ToLower(portSegment), "port=") {
+		return nil, fmt.Errorf("trojan server requires port=... format: %s", server)
+	}
+	portValue := strings.TrimSpace(portSegment[len("port="):])
+	if portValue == "" {
+		return nil, fmt.Errorf("trojan port value is empty")
+	}
+
+	publicPortText := portValue
+	listenPortText := ""
+	if idx := strings.Index(portValue, "#"); idx >= 0 {
+		publicPortText = strings.TrimSpace(portValue[:idx])
+		listenPortText = strings.TrimSpace(portValue[idx+1:])
+	}
+
+	publicPort, err := parsePortValue(publicPortText)
+	if err != nil {
+		return nil, fmt.Errorf("invalid trojan public port: %w", err)
+	}
+	listenPort := publicPort
+	if listenPortText != "" {
+		listenPort, err = parsePortValue(listenPortText)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trojan listen port offset: %w", err)
+		}
+	}
+
+	extra := ""
+	if len(segments) > 1 {
+		extra = strings.Join(segments[1:], "|")
+	}
+	params := parseNodeExtraParams(extra)
+
+	serverName := strings.TrimSpace(params["host"])
+	if serverName == "" {
+		serverName = strings.TrimSpace(params["server"])
+	}
+	if serverName == "" {
+		serverName = connectHost
+	}
+
+	listenIP := "0.0.0.0"
+	if ip := net.ParseIP(connectHost); ip != nil {
+		listenIP = ip.String()
+	}
+
+	return &trojanEndpoint{
+		ListenIP:    listenIP,
+		ListenPort:  listenPort,
+		ConnectHost: connectHost,
+		ConnectPort: publicPort,
+		ServerName:  serverName,
+		ExtraParams: params,
+	}, nil
+}
+
+func parsePortValue(text string) (int, error) {
+	port, err := strconv.Atoi(strings.TrimSpace(text))
+	if err != nil || port <= 0 || port > 65535 {
+		return 0, fmt.Errorf("invalid port: %s", text)
+	}
+	return port, nil
+}
+
 func buildVMessNetworkSettings(endpoint *vmessEndpoint, acceptProxyProtocol bool) (json.RawMessage, error) {
 	switch endpoint.Network {
 	case "tcp":
@@ -747,6 +935,61 @@ func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, n
 		Provider:         provider,
 		RejectUnknownSni: rejectUnknownSni,
 	}
+}
+
+func resolveTrojanCertInfo(endpoint *trojanEndpoint, client *Client, protocol string, nodeID int) *CertInfo {
+	host := strings.TrimSpace(endpoint.ServerName)
+	if host == "" {
+		host = strings.TrimSpace(endpoint.ConnectHost)
+	}
+	vmessLikeEndpoint := &vmessEndpoint{
+		ListenIP:    strings.TrimSpace(endpoint.ConnectHost),
+		Host:        host,
+		ServerName:  host,
+		ExtraParams: endpoint.ExtraParams,
+	}
+	return resolveCertInfo(vmessLikeEndpoint, client, protocol, nodeID)
+}
+
+func buildProxyProtocolNetworkSettings(acceptProxyProtocol bool) (json.RawMessage, error) {
+	if !acceptProxyProtocol {
+		return nil, nil
+	}
+	settings := map[string]interface{}{
+		"acceptProxyProtocol": true,
+	}
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		return nil, fmt.Errorf("marshal proxy protocol settings error: %w", err)
+	}
+	return raw, nil
+}
+
+func buildNodeFallbackObject(src *FallbackObject) (*FallbackObject, error) {
+	fb := &FallbackObject{
+		Dest: 80,
+		Xver: 0,
+	}
+	if src != nil {
+		fb.Name = strings.TrimSpace(src.Name)
+		fb.Alpn = strings.TrimSpace(src.Alpn)
+		fb.Path = strings.TrimSpace(src.Path)
+		if src.Dest > 0 {
+			fb.Dest = src.Dest
+		}
+		fb.Xver = src.Xver
+	}
+
+	if fb.Dest <= 0 || fb.Dest > 65535 {
+		return nil, fmt.Errorf("invalid fallback dest: %d", fb.Dest)
+	}
+	if fb.Xver < 0 || fb.Xver > 2 {
+		return nil, fmt.Errorf("invalid fallback xver: %d", fb.Xver)
+	}
+	if fb.Path != "" && !strings.HasPrefix(fb.Path, "/") {
+		return nil, fmt.Errorf("invalid fallback path %q: must start with /", fb.Path)
+	}
+	return fb, nil
 }
 
 func resolveGlobalCertInfo(client *Client, defaultDomain string) *CertInfo {

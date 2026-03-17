@@ -78,6 +78,14 @@ type CertConfig struct {
 	RejectUnknownSni bool              `mapstructure:"RejectUnknownSni"`
 }
 
+type FallbackObject struct {
+	Name string `mapstructure:"name"`
+	Alpn string `mapstructure:"alpn"`
+	Path string `mapstructure:"path"`
+	Dest int    `mapstructure:"dest"`
+	Xver int    `mapstructure:"xver"`
+}
+
 type NodeConfig struct {
 	APIHost             string `mapstructure:"ApiHost"`
 	NodeID              int
@@ -90,6 +98,8 @@ type NodeConfig struct {
 	MURegex             string `mapstructure:"mu_regex"`
 	SSObfsUDP           bool   `mapstructure:"ss_obfs_udp"`
 	CertConfig          *CertConfig
+	EnableFallback      bool            `mapstructure:"EnableFallback"`
+	FallbackObject      *FallbackObject `mapstructure:"FallbackObject"`
 	GlobalCertConfig    *CertConfig
 	CertFile            string `mapstructure:"CertFile"` // 兼容旧配置
 	KeyFile             string `mapstructure:"KeyFile"`  // 兼容旧配置
@@ -97,19 +107,21 @@ type NodeConfig struct {
 }
 
 type nodeConfigSource struct {
-	APIHost             string      `mapstructure:"ApiHost"`
-	NodeID              interface{} `mapstructure:"NodeID"`
-	NodeType            string      `mapstructure:"NodeType"`
-	Key                 string      `mapstructure:"ApiKey"`
-	Timeout             int         `mapstructure:"Timeout"`
-	ListenIP            string      `mapstructure:"ListenIP"`
-	MUSuffix            string      `mapstructure:"mu_suffix"`
-	MURegex             string      `mapstructure:"mu_regex"`
-	SSObfsUDP           bool        `mapstructure:"ss_obfs_udp"`
-	CertConfig          *CertConfig `mapstructure:"CertConfig"`
-	CertFile            string      `mapstructure:"CertFile"`
-	KeyFile             string      `mapstructure:"KeyFile"`
-	AcceptProxyProtocol bool        `mapstructure:"acceptProxyProtocol"`
+	APIHost             string          `mapstructure:"ApiHost"`
+	NodeID              interface{}     `mapstructure:"NodeID"`
+	NodeType            string          `mapstructure:"NodeType"`
+	Key                 string          `mapstructure:"ApiKey"`
+	Timeout             int             `mapstructure:"Timeout"`
+	ListenIP            string          `mapstructure:"ListenIP"`
+	MUSuffix            string          `mapstructure:"mu_suffix"`
+	MURegex             string          `mapstructure:"mu_regex"`
+	SSObfsUDP           bool            `mapstructure:"ss_obfs_udp"`
+	CertConfig          *CertConfig     `mapstructure:"CertConfig"`
+	EnableFallback      bool            `mapstructure:"EnableFallback"`
+	FallbackObject      *FallbackObject `mapstructure:"FallbackObject"`
+	CertFile            string          `mapstructure:"CertFile"`
+	KeyFile             string          `mapstructure:"KeyFile"`
+	AcceptProxyProtocol bool            `mapstructure:"acceptProxyProtocol"`
 }
 
 type fileConf struct {
@@ -379,6 +391,8 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 				MURegex:             source.MURegex,
 				SSObfsUDP:           source.SSObfsUDP,
 				CertConfig:          certConfig,
+				EnableFallback:      source.EnableFallback,
+				FallbackObject:      normalizeFallbackObject(source.FallbackObject),
 				CertFile:            certFile,
 				KeyFile:             keyFile,
 				AcceptProxyProtocol: source.AcceptProxyProtocol,
@@ -400,6 +414,31 @@ func cloneCertConfig(src *CertConfig) *CertConfig {
 		}
 	}
 	return &dst
+}
+
+func cloneFallbackObject(src *FallbackObject) *FallbackObject {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	return &dst
+}
+
+func normalizeFallbackObject(src *FallbackObject) *FallbackObject {
+	fb := cloneFallbackObject(src)
+	if fb == nil {
+		return nil
+	}
+	fb.Name = strings.TrimSpace(fb.Name)
+	fb.Alpn = strings.TrimSpace(fb.Alpn)
+	fb.Path = strings.TrimSpace(fb.Path)
+	if fb.Dest <= 0 {
+		fb.Dest = 80
+	}
+	if fb.Xver < 0 {
+		fb.Xver = 0
+	}
+	return fb
 }
 
 func normalizeDNSEnv(src map[string]string) map[string]string {
