@@ -15,6 +15,7 @@ import (
 	"github.com/wyx2685/v2node/core"
 	"github.com/wyx2685/v2node/limiter"
 	"github.com/wyx2685/v2node/node"
+	xrayss "github.com/xtls/xray-core/proxy/shadowsocks"
 	xrayvmess "github.com/xtls/xray-core/proxy/vmess"
 )
 
@@ -89,7 +90,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		log.WithField("err", err).Error("Init global device limit config failed")
 		return
 	}
-	applyVMessIPUserCacheConfig(c)
+	applyIPUserCacheConfig(c)
 	//get node info
 	nodes, err := node.New(c.NodeConfigs)
 	if err != nil {
@@ -202,7 +203,7 @@ func reload(config string, nodes **node.Node, v2core **core.V2Core) error {
 	if err := applyGlobalDeviceLimitConfig(newConf); err != nil {
 		return err
 	}
-	applyVMessIPUserCacheConfig(newConf)
+	applyIPUserCacheConfig(newConf)
 
 	newCore := core.New(newConf)
 	// Reattach reload channel
@@ -236,8 +237,13 @@ func applyGlobalDeviceLimitConfig(c *conf.Conf) error {
 	})
 }
 
-func applyVMessIPUserCacheConfig(c *conf.Conf) {
+func applyIPUserCacheConfig(c *conf.Conf) {
 	xrayvmess.SetIPUserCacheConfig(
+		c.IPUserCacheTime,
+		c.IPUserCacheSaveEnable,
+		c.IPUserCacheSaveDir,
+	)
+	xrayss.SetIPUserCacheConfig(
 		c.IPUserCacheTime,
 		c.IPUserCacheSaveEnable,
 		c.IPUserCacheSaveDir,
