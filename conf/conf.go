@@ -42,6 +42,8 @@ type Conf struct {
 	IPUserCacheSaveEnable   bool                    `mapstructure:"ip_user_cache_save_enable"`
 	IPUserCacheSaveDir      string                  `mapstructure:"ip_user_cache_save_dir"`
 	DNS                     DNSConfig               `mapstructure:"DNS"`
+	Routing                 RoutingConfig           `mapstructure:"Routing"`
+	Outbounds               OutboundsConfig         `mapstructure:"Outbounds"`
 }
 
 type LogConfig struct {
@@ -51,6 +53,14 @@ type LogConfig struct {
 }
 
 type DNSConfig struct {
+	File string `mapstructure:"File"`
+}
+
+type RoutingConfig struct {
+	File string `mapstructure:"File"`
+}
+
+type OutboundsConfig struct {
 	File string `mapstructure:"File"`
 }
 
@@ -154,6 +164,8 @@ type fileConf struct {
 	IPUserCacheSaveEnable   bool                    `mapstructure:"ip_user_cache_save_enable"`
 	IPUserCacheSaveDir      string                  `mapstructure:"ip_user_cache_save_dir"`
 	DNS                     DNSConfig               `mapstructure:"DNS"`
+	Routing                 RoutingConfig           `mapstructure:"Routing"`
+	Outbounds               OutboundsConfig         `mapstructure:"Outbounds"`
 }
 
 func New() *Conf {
@@ -232,6 +244,9 @@ func (p *Conf) LoadFromPath(filePath string) error {
 		IPUserCacheTime:         p.IPUserCacheTime,
 		IPUserCacheSaveEnable:   p.IPUserCacheSaveEnable,
 		IPUserCacheSaveDir:      p.IPUserCacheSaveDir,
+		DNS:                     p.DNS,
+		Routing:                 p.Routing,
+		Outbounds:               p.Outbounds,
 	}
 	if err := v.Unmarshal(&loaded); err != nil {
 		return fmt.Errorf("unmarshal config error: %s", err)
@@ -283,6 +298,11 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.GlobalCertFile = strings.TrimSpace(loaded.GlobalCertFile)
 	p.GlobalKeyFile = strings.TrimSpace(loaded.GlobalKeyFile)
 	p.DNS = loaded.DNS
+	p.DNS.File = strings.TrimSpace(p.DNS.File)
+	p.Routing = loaded.Routing
+	p.Routing.File = strings.TrimSpace(p.Routing.File)
+	p.Outbounds = loaded.Outbounds
+	p.Outbounds.File = strings.TrimSpace(p.Outbounds.File)
 	configDir := filepath.Dir(filePath)
 	globalCertConfig := cloneCertConfig(loaded.GlobalCertConfig)
 	if globalCertConfig == nil && (p.GlobalCertFile != "" || p.GlobalKeyFile != "") {
@@ -300,6 +320,12 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	}
 	if p.DNS.File != "" && !filepath.IsAbs(p.DNS.File) {
 		p.DNS.File = filepath.Join(configDir, p.DNS.File)
+	}
+	if p.Routing.File != "" && !filepath.IsAbs(p.Routing.File) {
+		p.Routing.File = filepath.Join(configDir, p.Routing.File)
+	}
+	if p.Outbounds.File != "" && !filepath.IsAbs(p.Outbounds.File) {
+		p.Outbounds.File = filepath.Join(configDir, p.Outbounds.File)
 	}
 	if p.DumpInboundsFile != "" && !filepath.IsAbs(p.DumpInboundsFile) {
 		p.DumpInboundsFile = filepath.Join(configDir, p.DumpInboundsFile)

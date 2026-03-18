@@ -63,6 +63,45 @@ func hasOutboundWithTag(list []*core.OutboundHandlerConfig, tag string) bool {
 	return false
 }
 
+func buildBaseOutbounds(c *conf.Conf) ([]*core.OutboundHandlerConfig, error) {
+	if c != nil && strings.TrimSpace(c.Outbounds.File) != "" {
+		return loadOutboundsConfig(c.Outbounds.File)
+	}
+	defaultOutbound, err := buildDefaultOutbound()
+	if err != nil {
+		return nil, err
+	}
+	blockOutbound, err := buildBlockOutbound()
+	if err != nil {
+		return nil, err
+	}
+	dnsOutbound, err := buildDnsOutbound()
+	if err != nil {
+		return nil, err
+	}
+	return []*core.OutboundHandlerConfig{defaultOutbound, blockOutbound, dnsOutbound}, nil
+}
+
+func buildDefaultRoutingConfig() *coreConf.RouterConfig {
+	domainStrategy := "AsIs"
+	dnsRule, _ := json.Marshal(map[string]interface{}{
+		"port":        "53",
+		"network":     "udp",
+		"outboundTag": "dns_out",
+	})
+	return &coreConf.RouterConfig{
+		RuleList:       []json.RawMessage{dnsRule},
+		DomainStrategy: &domainStrategy,
+	}
+}
+
+func buildBaseRouting(c *conf.Conf) (*coreConf.RouterConfig, error) {
+	if c != nil && strings.TrimSpace(c.Routing.File) != "" {
+		return loadRoutingConfig(c.Routing.File)
+	}
+	return buildDefaultRoutingConfig(), nil
+}
+
 func GetCustomConfig(c *conf.Conf, infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHandlerConfig, *router.Config, error) {
 	geoData := newGeoDataResolver(c)
 	auditWhiteList, err := loadAuditWhiteListConfig(c)
@@ -104,23 +143,15 @@ func GetCustomConfig(c *conf.Conf, infos []*panel.NodeInfo) (*dns.Config, []*cor
 		}
 	}
 	//outbound
-	defaultoutbound, _ := buildDefaultOutbound()
-	coreOutboundConfig := append([]*core.OutboundHandlerConfig{}, defaultoutbound)
-	block, _ := buildBlockOutbound()
-	coreOutboundConfig = append(coreOutboundConfig, block)
-	dns, _ := buildDnsOutbound()
-	coreOutboundConfig = append(coreOutboundConfig, dns)
+	coreOutboundConfig, err := buildBaseOutbounds(c)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	//route
-	domainStrategy := "AsIs"
-	dnsRule, _ := json.Marshal(map[string]interface{}{
-		"port":        "53",
-		"network":     "udp",
-		"outboundTag": "dns_out",
-	})
-	coreRouterConfig := &coreConf.RouterConfig{
-		RuleList:       []json.RawMessage{dnsRule},
-		DomainStrategy: &domainStrategy,
+	coreRouterConfig, err := buildBaseRouting(c)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	inboundTags := collectInboundTags(infos)
 	if len(inboundTags) > 0 {
@@ -723,32 +754,121 @@ func appendForbiddenProtocolRules(coreRouterConfig *coreConf.RouterConfig, inbou
 	}
 }
 
-func loadDNSConfig(filePath string) (*coreConf.DNSConfig, error) {
+type outboundsFileConfig struct {
+	Outbounds []*coreConf.OutboundDetourConfig `json:"outbounds"`
+}
+
+type routingFileConfig struct {
+	Routing *coreConf.RouterConfig `json:"routing"`
+}
+
+func readConfigFile(filePath string) ([]byte, error) {
 	rawBytes, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("read dns config file error: %w", err)
+		return nil, err
 	}
 	// Handle UTF-8 BOM to avoid parser errors for files edited on some platforms.
-	rawBytes = bytes.TrimPrefix(rawBytes, []byte{0xEF, 0xBB, 0xBF})
-	cfg := &coreConf.DNSConfig{}
-	// Try JSON first.
-	if err := json.Unmarshal(rawBytes, cfg); err == nil {
-		return cfg, nil
-	}
+	return bytes.TrimPrefix(rawBytes, []byte{0xEF, 0xBB, 0xBF}), nil
+}
 
+func unmarshalJSONOrYAML(rawBytes []byte, out interface{}) error {
+	// Try JSON first.
+	if err := json.Unmarshal(rawBytes, out); err == nil {
+		return nil
+	}
 	// Fallback to YAML, then convert to JSON and unmarshal using xray's JSON rules.
 	var yamlObj interface{}
 	if err := yaml.Unmarshal(rawBytes, &yamlObj); err != nil {
-		return nil, fmt.Errorf("parse dns config file %s error: %w", filePath, err)
+		return err
 	}
 	rawJSON, err := json.Marshal(normalizeYAMLObject(yamlObj))
 	if err != nil {
-		return nil, fmt.Errorf("marshal dns config file %s error: %w", filePath, err)
+		return err
 	}
-	if err := json.Unmarshal(rawJSON, cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal dns config file %s error: %w", filePath, err)
+	return json.Unmarshal(rawJSON, out)
+}
+
+func loadDNSConfig(filePath string) (*coreConf.DNSConfig, error) {
+	rawBytes, err := readConfigFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read dns config file error: %w", err)
+	}
+	cfg := &coreConf.DNSConfig{}
+	if err := unmarshalJSONOrYAML(rawBytes, cfg); err != nil {
+		return nil, fmt.Errorf("parse dns config file %s error: %w", filePath, err)
 	}
 	return cfg, nil
+}
+
+func loadRoutingConfig(filePath string) (*coreConf.RouterConfig, error) {
+	rawBytes, err := readConfigFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read routing config file error: %w", err)
+	}
+	cfg := &coreConf.RouterConfig{}
+	if err := unmarshalJSONOrYAML(rawBytes, cfg); err != nil {
+		return nil, fmt.Errorf("parse routing config file %s error: %w", filePath, err)
+	}
+	if isRouterConfigEmpty(cfg) {
+		wrapped := routingFileConfig{}
+		if err := unmarshalJSONOrYAML(rawBytes, &wrapped); err == nil && wrapped.Routing != nil {
+			cfg = wrapped.Routing
+		}
+	}
+	if cfg.RuleList == nil {
+		cfg.RuleList = []json.RawMessage{}
+	}
+	if cfg.DomainStrategy == nil || strings.TrimSpace(*cfg.DomainStrategy) == "" {
+		domainStrategy := "AsIs"
+		cfg.DomainStrategy = &domainStrategy
+	}
+	return cfg, nil
+}
+
+func loadOutboundsConfig(filePath string) ([]*core.OutboundHandlerConfig, error) {
+	rawBytes, err := readConfigFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read outbounds config file error: %w", err)
+	}
+	var outbounds []*coreConf.OutboundDetourConfig
+	if err := unmarshalJSONOrYAML(rawBytes, &outbounds); err != nil {
+		wrapped := outboundsFileConfig{}
+		if wrapErr := unmarshalJSONOrYAML(rawBytes, &wrapped); wrapErr != nil {
+			return nil, fmt.Errorf("parse outbounds config file %s error: %w", filePath, err)
+		}
+		outbounds = wrapped.Outbounds
+	}
+	if len(outbounds) == 0 {
+		return nil, fmt.Errorf("outbounds config file %s has no outbounds", filePath)
+	}
+	result := make([]*core.OutboundHandlerConfig, 0, len(outbounds))
+	for i, outbound := range outbounds {
+		if outbound == nil {
+			continue
+		}
+		built, err := outbound.Build()
+		if err != nil {
+			return nil, fmt.Errorf("build outbounds config file %s item %d error: %w", filePath, i, err)
+		}
+		result = append(result, built)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("outbounds config file %s has no valid outbounds", filePath)
+	}
+	return result, nil
+}
+
+func isRouterConfigEmpty(cfg *coreConf.RouterConfig) bool {
+	if cfg == nil {
+		return true
+	}
+	if len(cfg.RuleList) > 0 {
+		return false
+	}
+	if len(cfg.Balancers) > 0 {
+		return false
+	}
+	return cfg.DomainStrategy == nil || strings.TrimSpace(*cfg.DomainStrategy) == ""
 }
 
 func normalizeYAMLObject(v interface{}) interface{} {
