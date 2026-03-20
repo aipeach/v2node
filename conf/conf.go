@@ -97,6 +97,7 @@ type FallbackObject struct {
 }
 
 type NodeConfig struct {
+	PanelType           string `mapstructure:"PanelType"`
 	APIHost             string `mapstructure:"ApiHost"`
 	NodeID              int
 	NodeType            string `mapstructure:"NodeType"`
@@ -117,6 +118,7 @@ type NodeConfig struct {
 }
 
 type nodeConfigSource struct {
+	PanelType           string          `mapstructure:"PanelType"`
 	APIHost             string          `mapstructure:"ApiHost"`
 	NodeID              interface{}     `mapstructure:"NodeID"`
 	NodeType            string          `mapstructure:"NodeType"`
@@ -381,6 +383,7 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 			if nodeID <= 0 {
 				return nil, fmt.Errorf("invalid Nodes[%d].NodeID: node id must be > 0", i)
 			}
+			panelType := normalizePanelType(source.PanelType)
 			nodeType := strings.TrimSpace(source.NodeType)
 			if nodeType == "" {
 				nodeType = "vmess"
@@ -407,6 +410,7 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 				}
 			}
 			out = append(out, NodeConfig{
+				PanelType:           panelType,
 				APIHost:             source.APIHost,
 				NodeID:              nodeID,
 				NodeType:            strings.ToLower(nodeType),
@@ -483,6 +487,17 @@ func normalizeDNSEnv(src map[string]string) map[string]string {
 		return nil
 	}
 	return out
+}
+
+func normalizePanelType(panelType string) string {
+	switch strings.ToLower(strings.TrimSpace(panelType)) {
+	case "", "sspanel", "sspanel-uim", "sspanel_uim", "sspaneluim":
+		return "sspanel"
+	case "v2board", "xiao-v2board", "xiao_v2board", "xiaov2board":
+		return "xiaov2board"
+	default:
+		return strings.ToLower(strings.TrimSpace(panelType))
+	}
 }
 
 func normalizeCertConfig(certConfig *CertConfig, configDir string) *CertConfig {
