@@ -64,10 +64,11 @@ func hasOutboundWithTag(list []*core.OutboundHandlerConfig, tag string) bool {
 }
 
 func buildBaseOutbounds(c *conf.Conf) ([]*core.OutboundHandlerConfig, error) {
+	autoOutIP := c != nil && c.AutoOutIP
 	if c != nil && strings.TrimSpace(c.Outbounds.File) != "" {
-		return loadOutboundsConfig(c.Outbounds.File)
+		return loadOutboundsConfig(c.Outbounds.File, autoOutIP)
 	}
-	defaultOutbound, err := buildDefaultOutbound()
+	defaultOutbound, err := buildDefaultOutbound(autoOutIP)
 	if err != nil {
 		return nil, err
 	}
@@ -841,7 +842,7 @@ func loadRoutingConfig(filePath string) (*coreConf.RouterConfig, error) {
 	return cfg, nil
 }
 
-func loadOutboundsConfig(filePath string) ([]*core.OutboundHandlerConfig, error) {
+func loadOutboundsConfig(filePath string, autoOutIP bool) ([]*core.OutboundHandlerConfig, error) {
 	rawBytes, err := readConfigFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read outbounds config file error: %w", err)
@@ -862,6 +863,7 @@ func loadOutboundsConfig(filePath string) ([]*core.OutboundHandlerConfig, error)
 		if outbound == nil {
 			continue
 		}
+		applyAutoOutIPToOutbound(outbound, autoOutIP)
 		built, err := outbound.Build()
 		if err != nil {
 			return nil, fmt.Errorf("build outbounds config file %s item %d error: %w", filePath, i, err)
@@ -872,6 +874,20 @@ func loadOutboundsConfig(filePath string) ([]*core.OutboundHandlerConfig, error)
 		return nil, fmt.Errorf("outbounds config file %s has no valid outbounds", filePath)
 	}
 	return result, nil
+}
+
+func applyAutoOutIPToOutbound(outbound *coreConf.OutboundDetourConfig, autoOutIP bool) {
+	if !autoOutIP || outbound == nil {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(outbound.Protocol), "freedom") {
+		return
+	}
+	if outbound.SendThrough != nil && strings.TrimSpace(*outbound.SendThrough) != "" {
+		return
+	}
+	sendThrough := "origin"
+	outbound.SendThrough = &sendThrough
 }
 
 func isRouterConfigEmpty(cfg *coreConf.RouterConfig) bool {

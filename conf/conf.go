@@ -44,6 +44,7 @@ type Conf struct {
 	DNS                     DNSConfig               `mapstructure:"DNS"`
 	Routing                 RoutingConfig           `mapstructure:"Routing"`
 	Outbounds               OutboundsConfig         `mapstructure:"Outbounds"`
+	AutoOutIP               bool                    `mapstructure:"Auto_out_ip"`
 }
 
 type LogConfig struct {
@@ -168,6 +169,7 @@ type fileConf struct {
 	DNS                     DNSConfig               `mapstructure:"DNS"`
 	Routing                 RoutingConfig           `mapstructure:"Routing"`
 	Outbounds               OutboundsConfig         `mapstructure:"Outbounds"`
+	AutoOutIP               bool                    `mapstructure:"Auto_out_ip"`
 }
 
 func New() *Conf {
@@ -249,6 +251,7 @@ func (p *Conf) LoadFromPath(filePath string) error {
 		DNS:                     p.DNS,
 		Routing:                 p.Routing,
 		Outbounds:               p.Outbounds,
+		AutoOutIP:               p.AutoOutIP,
 	}
 	if err := v.Unmarshal(&loaded); err != nil {
 		return fmt.Errorf("unmarshal config error: %s", err)
@@ -305,6 +308,7 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.Routing.File = strings.TrimSpace(p.Routing.File)
 	p.Outbounds = loaded.Outbounds
 	p.Outbounds.File = strings.TrimSpace(p.Outbounds.File)
+	p.AutoOutIP = loaded.AutoOutIP
 	configDir := filepath.Dir(filePath)
 	globalCertConfig := cloneCertConfig(loaded.GlobalCertConfig)
 	if globalCertConfig == nil && (p.GlobalCertFile != "" || p.GlobalKeyFile != "") {

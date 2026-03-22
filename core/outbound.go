@@ -10,12 +10,14 @@ import (
 )
 
 // build default freedom outbund
-func buildDefaultOutbound() (*core.OutboundHandlerConfig, error) {
+func buildDefaultOutbound(autoOutIP bool) (*core.OutboundHandlerConfig, error) {
 	outboundDetourConfig := &conf.OutboundDetourConfig{}
 	outboundDetourConfig.Protocol = "freedom"
 	outboundDetourConfig.Tag = "Default"
-	//sendthrough := "origin"
-	//outboundDetourConfig.SendThrough = &sendthrough
+	if autoOutIP {
+		sendThrough := "origin"
+		outboundDetourConfig.SendThrough = &sendThrough
+	}
 
 	proxySetting := &conf.FreedomConfig{
 		DomainStrategy: "UseIPv4v6",
