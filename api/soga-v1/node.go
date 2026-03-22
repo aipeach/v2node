@@ -323,6 +323,8 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 			if common.ServerKey == "" {
 				return nil, fmt.Errorf("shadowsocks 2022 requires node password in config.password")
 			}
+			// ss2022 需使用节点密码 + 用户密码模型，走单端口多用户配置。
+			common.SSSinglePortMultiUser = true
 		}
 		if raw, err := buildShadowsocksNetworkSettings(cfg.Obfs, cfg.Path, cfg.Host, c.AcceptProxyProto); err != nil {
 			return nil, err

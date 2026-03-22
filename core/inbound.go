@@ -82,7 +82,11 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 		}
 		if n.AcceptProxyProtocol {
 			if in.StreamSetting == nil {
-				t := coreConf.TransportProtocol(nodeInfo.Common.Network)
+				network := strings.TrimSpace(nodeInfo.Common.Network)
+				if network == "" {
+					network = "tcp"
+				}
+				t := coreConf.TransportProtocol(network)
 				in.StreamSetting = &coreConf.StreamConfig{
 					Network: &t,
 					SocketSettings: &coreConf.SocketConfig{
