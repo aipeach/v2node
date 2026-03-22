@@ -136,6 +136,11 @@ func (n *Node) Close() error {
 }
 
 func expandNodeConfig(node conf.NodeConfig) ([]conf.NodeConfig, error) {
+	panelType := strings.ToLower(strings.TrimSpace(node.PanelType))
+	if panelType == panel.PanelTypeSogaV1 || panelType == "soga_v1" || panelType == "sogav1" {
+		return []conf.NodeConfig{node}, nil
+	}
+
 	normalizedType := strings.ToLower(strings.TrimSpace(node.NodeType))
 	if normalizedType != "ssr" && normalizedType != "shadowsocksr" {
 		return []conf.NodeConfig{node}, nil

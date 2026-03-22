@@ -10,6 +10,7 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/go-resty/resty/v2"
+	sogav1 "github.com/wyx2685/v2node/api/soga-v1"
 	sspanel "github.com/wyx2685/v2node/api/sspanel"
 	"github.com/wyx2685/v2node/conf"
 )
@@ -17,10 +18,12 @@ import (
 const (
 	PanelTypeXiaoV2board = "xiaov2board"
 	PanelTypeSSPanel     = "sspanel"
+	PanelTypeSogaV1      = "soga-v1"
 )
 
 type Client struct {
 	sspanelClient *sspanel.Client
+	sogaClient    *sogav1.Client
 
 	client           *resty.Client
 	APIHost          string
@@ -43,6 +46,14 @@ func New(c *conf.NodeConfig) (*Client, error) {
 		}
 		return &Client{
 			sspanelClient: client,
+		}, nil
+	case PanelTypeSogaV1:
+		client, err := sogav1.New(c)
+		if err != nil {
+			return nil, err
+		}
+		return &Client{
+			sogaClient: client,
 		}, nil
 	case PanelTypeXiaoV2board:
 	default:
@@ -85,6 +96,8 @@ func normalizePanelType(panelType string) string {
 		return PanelTypeSSPanel
 	case "v2board", "xiao-v2board", "xiao_v2board", PanelTypeXiaoV2board:
 		return PanelTypeXiaoV2board
+	case "soga-v1", "soga_v1", "sogav1":
+		return PanelTypeSogaV1
 	default:
 		return strings.ToLower(strings.TrimSpace(panelType))
 	}

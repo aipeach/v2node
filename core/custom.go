@@ -169,13 +169,14 @@ func GetCustomConfig(c *conf.Conf, infos []*panel.NodeInfo) (*dns.Config, []*cor
 	}
 
 	for _, info := range infos {
-		if len(info.Common.Routes) == 0 {
+		if info == nil || info.Common == nil || len(info.Common.Routes) == 0 {
 			continue
 		}
+		mergedAuditWhiteList := mergeAuditWhiteListConfig(auditWhiteList, info.Common.AuditWhiteList)
 		auditWhiteListAppended := false
 		for _, route := range info.Common.Routes {
 			if route.DetectRule && !auditWhiteListAppended {
-				appendAuditWhiteListRules(coreRouterConfig, info.Tag, auditWhiteList, geoData)
+				appendAuditWhiteListRules(coreRouterConfig, info.Tag, mergedAuditWhiteList, geoData)
 				auditWhiteListAppended = true
 			}
 			switch route.Action {
@@ -642,6 +643,21 @@ func dedupeStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func mergeAuditWhiteListConfig(base auditWhiteListConfig, extra []string) auditWhiteListConfig {
+	merged := auditWhiteListConfig{
+		DomainRules: append([]string(nil), base.DomainRules...),
+		IPRules:     append([]string(nil), base.IPRules...),
+		PortRules:   append([]string(nil), base.PortRules...),
+	}
+	for _, line := range extra {
+		parseAuditWhiteListLine(line, &merged)
+	}
+	merged.DomainRules = dedupeStrings(merged.DomainRules)
+	merged.IPRules = dedupeStrings(merged.IPRules)
+	merged.PortRules = dedupeStrings(merged.PortRules)
+	return merged
 }
 
 func appendAuditWhiteListRules(coreRouterConfig *coreConf.RouterConfig, inboundTag string, rules auditWhiteListConfig, resolver geoDataResolver) {

@@ -30,6 +30,7 @@ func cloneCommonNodeFromSSPanel(src *sspanel.CommonNode) *CommonNode {
 		ListenIP:                src.ListenIP,
 		ServerPort:              src.ServerPort,
 		Routes:                  cloneRoutesFromSSPanel(src.Routes),
+		AuditWhiteList:          append([]string(nil), src.AuditWhiteList...),
 		BaseConfig:              cloneBaseConfigFromSSPanel(src.BaseConfig),
 		Tls:                     src.Tls,
 		TlsSettings:             TlsSettings(src.TlsSettings),

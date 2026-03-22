@@ -32,11 +32,12 @@ type NodeInfo struct {
 }
 
 type CommonNode struct {
-	Protocol   string      `json:"protocol"`
-	ListenIP   string      `json:"listen_ip"`
-	ServerPort int         `json:"server_port"`
-	Routes     []Route     `json:"routes"`
-	BaseConfig *BaseConfig `json:"base_config"`
+	Protocol       string      `json:"protocol"`
+	ListenIP       string      `json:"listen_ip"`
+	ServerPort     int         `json:"server_port"`
+	Routes         []Route     `json:"routes"`
+	AuditWhiteList []string    `json:"audit_white_list,omitempty"`
+	BaseConfig     *BaseConfig `json:"base_config"`
 	//vless vmess trojan
 	Tls                int         `json:"tls"`
 	TlsSettings        TlsSettings `json:"tls_settings"`

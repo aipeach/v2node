@@ -495,6 +495,8 @@ func normalizePanelType(panelType string) string {
 		return "sspanel"
 	case "v2board", "xiao-v2board", "xiao_v2board", "xiaov2board":
 		return "xiaov2board"
+	case "soga-v1", "soga_v1", "sogav1":
+		return "soga-v1"
 	default:
 		return strings.ToLower(strings.TrimSpace(panelType))
 	}

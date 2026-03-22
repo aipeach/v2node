@@ -43,6 +43,13 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 		}
 		return cloneUserListFromSSPanel(users), nil
 	}
+	if c != nil && c.sogaClient != nil {
+		users, err := c.sogaClient.GetUserList()
+		if err != nil {
+			return nil, err
+		}
+		return cloneUserListFromSSPanel(users), nil
+	}
 
 	const path = "/api/v1/server/UniProxy/user"
 	r, err := c.client.R().
@@ -79,6 +86,9 @@ func (c *Client) GetUserAlive() (map[int]int, error) {
 	if c != nil && c.sspanelClient != nil {
 		return c.sspanelClient.GetUserAlive()
 	}
+	if c != nil && c.sogaClient != nil {
+		return c.sogaClient.GetUserAlive()
+	}
 
 	empty := map[int]int{}
 	const path = "/api/v1/server/UniProxy/alivelist"
@@ -109,6 +119,9 @@ func (c *Client) GetSSRSinglePortModes() ([]string, error) {
 	if c != nil && c.sspanelClient != nil {
 		return c.sspanelClient.GetSSRSinglePortModes()
 	}
+	if c != nil && c.sogaClient != nil {
+		return c.sogaClient.GetSSRSinglePortModes()
+	}
 	return nil, nil
 }
 
@@ -126,6 +139,9 @@ type DetectLog struct {
 func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 	if c != nil && c.sspanelClient != nil {
 		return c.sspanelClient.ReportUserTraffic(cloneUserTrafficToSSPanel(userTraffic))
+	}
+	if c != nil && c.sogaClient != nil {
+		return c.sogaClient.ReportUserTraffic(cloneUserTrafficToSSPanel(userTraffic))
 	}
 	if len(userTraffic) == 0 {
 		return nil
@@ -154,6 +170,9 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 	if c != nil && c.sspanelClient != nil {
 		return c.sspanelClient.ReportNodeOnlineUsers(data)
 	}
+	if c != nil && c.sogaClient != nil {
+		return c.sogaClient.ReportNodeOnlineUsers(data)
+	}
 	if data == nil || len(*data) == 0 {
 		return nil
 	}
@@ -175,6 +194,16 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 func (c *Client) ReportUserDetectLogs(logs []DetectLog) error {
 	if c != nil && c.sspanelClient != nil {
 		return c.sspanelClient.ReportUserDetectLogs(cloneDetectLogsToSSPanel(logs))
+	}
+	if c != nil && c.sogaClient != nil {
+		return c.sogaClient.ReportUserDetectLogs(cloneDetectLogsToSSPanel(logs))
+	}
+	return nil
+}
+
+func (c *Client) ReportNodeStatus() error {
+	if c != nil && c.sogaClient != nil {
+		return c.sogaClient.ReportNodeStatus()
 	}
 	return nil
 }

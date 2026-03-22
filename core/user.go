@@ -295,9 +295,13 @@ func buildSSUsers(tag string, userInfo []panel.UserInfo, cypher string, serverKe
 }
 
 func buildSSUser(tag string, userInfo *panel.UserInfo, cypher string, serverKey string) (user *protocol.User) {
+	password := strings.TrimSpace(userInfo.SSClientPassword)
+	if password == "" {
+		password = userInfo.Uuid
+	}
 	if serverKey == "" {
 		ssAccount := &shadowsocks.Account{
-			Password:   userInfo.Uuid,
+			Password:   password,
 			CipherType: getCipherFromString(cypher),
 		}
 		return &protocol.User{
@@ -315,8 +319,15 @@ func buildSSUser(tag string, userInfo *panel.UserInfo, cypher string, serverKey 
 		case "2022-blake3-chacha20-poly1305":
 			keyLength = 32
 		}
+		if keyLength <= 0 {
+			keyLength = 32
+		}
+		keySource := password
+		if len(keySource) < keyLength {
+			keySource += strings.Repeat("0", keyLength-len(keySource))
+		}
 		ssAccount := &shadowsocks_2022.Account{
-			Key: base64.StdEncoding.EncodeToString([]byte(userInfo.Uuid[:keyLength])),
+			Key: base64.StdEncoding.EncodeToString([]byte(keySource[:keyLength])),
 		}
 		return &protocol.User{
 			Level:   0,

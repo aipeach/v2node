@@ -92,6 +92,13 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}
 	}
 
+	if err = c.apiClient.ReportNodeStatus(); err != nil {
+		log.WithFields(log.Fields{
+			"tag": c.tag,
+			"err": err,
+		}).Info("Report node status failed")
+	}
+
 	allTraffic = nil
 	userTraffic = nil
 	return nil

@@ -29,11 +29,12 @@ type NodeInfo struct {
 }
 
 type CommonNode struct {
-	Protocol   string      `json:"protocol"`
-	ListenIP   string      `json:"listen_ip"`
-	ServerPort int         `json:"server_port"`
-	Routes     []Route     `json:"routes"`
-	BaseConfig *BaseConfig `json:"base_config"`
+	Protocol       string      `json:"protocol"`
+	ListenIP       string      `json:"listen_ip"`
+	ServerPort     int         `json:"server_port"`
+	Routes         []Route     `json:"routes"`
+	AuditWhiteList []string    `json:"audit_white_list,omitempty"`
+	BaseConfig     *BaseConfig `json:"base_config"`
 
 	Tls                int         `json:"tls"`
 	TlsSettings        TlsSettings `json:"tls_settings"`
@@ -135,6 +136,13 @@ type FallbackObject struct {
 func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 	if c != nil && c.sspanelClient != nil {
 		info, err := c.sspanelClient.GetNodeInfo()
+		if err != nil {
+			return nil, err
+		}
+		return cloneNodeInfoFromSSPanel(info), nil
+	}
+	if c != nil && c.sogaClient != nil {
+		info, err := c.sogaClient.GetNodeInfo()
 		if err != nil {
 			return nil, err
 		}
