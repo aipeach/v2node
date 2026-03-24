@@ -209,22 +209,31 @@ func buildVLess(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig)
 	inbound.Protocol = "vless"
 	var err error
 	decryption := "none"
-	if nodeInfo.Common.Encryption != "" {
-		switch nodeInfo.Common.Encryption {
-		case "mlkem768x25519plus":
-			encSettings := nodeInfo.Common.EncryptionSettings
-			parts := []string{
-				"mlkem768x25519plus",
-				encSettings.Mode,
-				encSettings.Ticket,
-			}
-			if encSettings.ServerPadding != "" {
-				parts = append(parts, encSettings.ServerPadding)
-			}
-			parts = append(parts, encSettings.PrivateKey)
-			decryption = strings.Join(parts, ".")
+	enc := strings.TrimSpace(nodeInfo.Common.Encryption)
+	if enc != "" {
+		switch {
+		case strings.EqualFold(enc, "none"):
+			decryption = "none"
+		case strings.Contains(enc, "."):
+			// 兼容面板直接返回完整 decryption dot config。
+			decryption = enc
 		default:
-			return fmt.Errorf("vless decryption method %s is not support", nodeInfo.Common.Encryption)
+			switch enc {
+			case "mlkem768x25519plus":
+				encSettings := nodeInfo.Common.EncryptionSettings
+				parts := []string{
+					"mlkem768x25519plus",
+					encSettings.Mode,
+					encSettings.Ticket,
+				}
+				if encSettings.ServerPadding != "" {
+					parts = append(parts, encSettings.ServerPadding)
+				}
+				parts = append(parts, encSettings.PrivateKey)
+				decryption = strings.Join(parts, ".")
+			default:
+				return fmt.Errorf("vless decryption method %s is not support", enc)
+			}
 		}
 	}
 	settings := &coreConf.VLessInboundConfig{

@@ -45,6 +45,7 @@ type sogaStreamNodeConfig struct {
 	Port        int      `json:"port"`
 	StreamType  string   `json:"stream_type"`
 	TlsType     string   `json:"tls_type"`
+	Decryption  string   `json:"decryption"`
 	Path        string   `json:"path"`
 	ServiceName string   `json:"service_name"`
 	Flow        string   `json:"flow"`
@@ -273,6 +274,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 			return nil, err
 		}
 		common.Flow = strings.TrimSpace(cfg.Flow)
+		applyVLESSDecryption(common, cfg)
 		switch strings.ToLower(strings.TrimSpace(cfg.TlsType)) {
 		case "reality":
 			applyReality(common, node, cfg)
@@ -405,6 +407,24 @@ func applyStreamNode(common *CommonNode, protocol string, cfg *sogaStreamNodeCon
 	common.Network = network
 	common.NetworkSettings = raw
 	return nil
+}
+
+func applyVLESSDecryption(common *CommonNode, cfg *sogaStreamNodeConfig) {
+	if common == nil || cfg == nil {
+		return
+	}
+	decryption := strings.TrimSpace(cfg.Decryption)
+	if decryption == "" {
+		return
+	}
+	if strings.EqualFold(decryption, "none") {
+		common.Encryption = "none"
+		common.EncryptionSettings = EncSettings{}
+		return
+	}
+	// Soga-v1 面板返回完整 dot config，直接透传到内核侧解析。
+	common.Encryption = decryption
+	common.EncryptionSettings = EncSettings{}
 }
 
 func buildStreamNetworkSettings(network string, path string, host string, serviceName string, acceptProxyProtocol bool) (json.RawMessage, error) {
