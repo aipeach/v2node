@@ -101,6 +101,12 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+	} else if isAnyTLSNodeType(c.NodeType) {
+		var err error
+		users, alive, err = c.buildAnyTLSUsers(resp.Data)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		for _, row := range resp.Data {
 			uuid := strings.TrimSpace(row.UUID)
@@ -244,6 +250,28 @@ func (c *Client) buildShadowsocksUsers(rows []modMUUserRow) ([]UserInfo, map[int
 			SpeedLimit:       intFromAny(row.NodeSpeedlimit),
 			DeviceLimit:      intFromAny(row.NodeConnector),
 			SSClientPassword: passwd,
+		})
+		alive[row.ID] = intFromAny(row.AliveIP)
+	}
+	return users, alive, nil
+}
+
+func (c *Client) buildAnyTLSUsers(rows []modMUUserRow) ([]UserInfo, map[int]int, error) {
+	users := make([]UserInfo, 0, len(rows))
+	alive := make(map[int]int, len(rows))
+	for _, row := range rows {
+		if row.ID <= 0 {
+			continue
+		}
+		uuid := strings.TrimSpace(row.UUID)
+		if uuid == "" {
+			continue
+		}
+		users = append(users, UserInfo{
+			Id:          row.ID,
+			Uuid:        uuid,
+			SpeedLimit:  intFromAny(row.NodeSpeedlimit),
+			DeviceLimit: intFromAny(row.NodeConnector),
 		})
 		alive[row.ID] = intFromAny(row.AliveIP)
 	}

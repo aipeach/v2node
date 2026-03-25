@@ -173,6 +173,12 @@ type trojanEndpoint struct {
 	ExtraParams map[string]string
 }
 
+type anyTLSEndpoint struct {
+	ListenIP    string
+	ListenPort  int
+	ConnectHost string
+}
+
 func (c *Client) GetNodeInfo() (*NodeInfo, error) {
 	path := fmt.Sprintf("/mod_mu/nodes/%d/info", c.NodeId)
 	r, err := c.client.
@@ -250,6 +256,8 @@ func buildModMUNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*N
 		return buildModMUVmessNodeInfo(client, data, routes, protocol)
 	case protocol == "trojan":
 		return buildModMUTrojanNodeInfo(client, data, routes)
+	case protocol == "anytls":
+		return buildModMUAnyTLSNodeInfo(client, data, routes)
 	case isShadowsocksNodeType(protocol):
 		return buildModMUShadowsocksNodeInfo(client, data, routes)
 	case isSSR:
@@ -484,6 +492,75 @@ func buildModMUTrojanNodeInfo(client *Client, data *modMUNodeData, routes []Rout
 	}, nil
 }
 
+func buildModMUAnyTLSNodeInfo(client *Client, data *modMUNodeData, routes []Route) (*NodeInfo, error) {
+	nodeID := client.NodeId
+	protocol := "anytls"
+
+	endpoint, err := parseAnyTLSEndpoint(data.Server)
+	if err != nil {
+		return nil, fmt.Errorf("parse anytls server field failed: %w", err)
+	}
+
+	interval := data.DisconnectTime
+	if interval <= 0 {
+		interval = 60
+	}
+
+	listenIP := endpoint.ListenIP
+	if strings.TrimSpace(client.ListenIP) != "" {
+		listenIP = strings.TrimSpace(client.ListenIP)
+	}
+
+	networkSettings, err := buildProxyProtocolNetworkSettings(client.AcceptProxyProto)
+	if err != nil {
+		return nil, err
+	}
+
+	certInfo := resolveAnyTLSCertInfo(endpoint, client, protocol, nodeID)
+	common := &CommonNode{
+		Protocol:        protocol,
+		ListenIP:        listenIP,
+		ServerPort:      endpoint.ListenPort,
+		Routes:          cloneRoutes(routes),
+		Network:         "tcp",
+		NetworkSettings: networkSettings,
+		Tls:             Tls,
+		TlsSettings: TlsSettings{
+			ServerName:       certInfo.CertDomain,
+			CertMode:         certInfo.CertMode,
+			CertFile:         certInfo.CertFile,
+			KeyFile:          certInfo.KeyFile,
+			KeyType:          certInfo.KeyType,
+			Provider:         certInfo.Provider,
+			DNSEnv:           dnsEnvToString(certInfo.DNSEnv),
+			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
+		},
+		CertInfo: certInfo,
+		BaseConfig: &BaseConfig{
+			PushInterval:           interval,
+			PullInterval:           interval,
+			DeviceOnlineMinTraffic: 0,
+			NodeReportMinTraffic:   0,
+		},
+	}
+
+	if globalCertInfo := resolveGlobalCertInfo(client, certInfo.CertDomain); globalCertInfo != nil {
+		if !sameCertPair(certInfo, globalCertInfo) {
+			common.ExtraCertInfos = append(common.ExtraCertInfos, globalCertInfo)
+		}
+	}
+
+	return &NodeInfo{
+		Id:           nodeID,
+		Type:         protocol,
+		Security:     Tls,
+		PushInterval: time.Duration(interval) * time.Second,
+		PullInterval: time.Duration(interval) * time.Second,
+		Tag:          fmt.Sprintf("[%s]-%s:%d", client.APIHost, protocol, nodeID),
+		Common:       common,
+	}, nil
+}
+
 func buildModMUSSRNodeInfo(client *Client, data *modMUNodeData, routes []Route, selectedMode string) (*NodeInfo, error) {
 	templateUser, err := client.fetchSSRTemplateUser(selectedMode)
 	if err != nil {
@@ -624,6 +701,10 @@ func isShadowsocksNodeType(nodeType string) bool {
 	return strings.EqualFold(strings.TrimSpace(nodeType), "shadowsocks")
 }
 
+func isAnyTLSNodeType(nodeType string) bool {
+	return strings.EqualFold(strings.TrimSpace(nodeType), "anytls")
+}
+
 func buildSSRNodeTag(apiHost, protocol string, nodeID int, selectedMode string) string {
 	selectedMode = normalizeSSRSinglePortMode(selectedMode)
 	if selectedMode == SSRSinglePortModeAuto || selectedMode == "" {
@@ -756,6 +837,64 @@ func parseTrojanEndpoint(server string) (*trojanEndpoint, error) {
 		ConnectPort: publicPort,
 		ServerName:  serverName,
 		ExtraParams: params,
+	}, nil
+}
+
+func parseAnyTLSEndpoint(server string) (*anyTLSEndpoint, error) {
+	parts := strings.SplitN(strings.TrimSpace(server), ";", 2)
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid anytls server format: %s", server)
+	}
+
+	connectHost := strings.TrimSpace(parts[0])
+	if connectHost == "" {
+		return nil, fmt.Errorf("anytls connect host is empty")
+	}
+
+	segments := strings.Split(strings.TrimSpace(parts[1]), "|")
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("anytls server parameters are empty")
+	}
+
+	// Only the first `port=...` segment is used by server-side inbound config.
+	// Extra client params like `sni` / `insecure` are intentionally ignored.
+	portSegment := strings.TrimSpace(segments[0])
+	if !strings.HasPrefix(strings.ToLower(portSegment), "port=") {
+		return nil, fmt.Errorf("anytls server requires port=... format: %s", server)
+	}
+	portValue := strings.TrimSpace(portSegment[len("port="):])
+	if portValue == "" {
+		return nil, fmt.Errorf("anytls port value is empty")
+	}
+
+	publicPortText := portValue
+	listenPortText := ""
+	if idx := strings.Index(portValue, "#"); idx >= 0 {
+		publicPortText = strings.TrimSpace(portValue[:idx])
+		listenPortText = strings.TrimSpace(portValue[idx+1:])
+	}
+
+	publicPort, err := parsePortValue(publicPortText)
+	if err != nil {
+		return nil, fmt.Errorf("invalid anytls public port: %w", err)
+	}
+	listenPort := publicPort
+	if listenPortText != "" {
+		listenPort, err = parsePortValue(listenPortText)
+		if err != nil {
+			return nil, fmt.Errorf("invalid anytls listen port offset: %w", err)
+		}
+	}
+
+	listenIP := "0.0.0.0"
+	if ip := net.ParseIP(connectHost); ip != nil {
+		listenIP = ip.String()
+	}
+
+	return &anyTLSEndpoint{
+		ListenIP:    listenIP,
+		ListenPort:  listenPort,
+		ConnectHost: connectHost,
 	}, nil
 }
 
@@ -948,6 +1087,16 @@ func resolveTrojanCertInfo(endpoint *trojanEndpoint, client *Client, protocol st
 		Host:        host,
 		ServerName:  host,
 		ExtraParams: endpoint.ExtraParams,
+	}
+	return resolveCertInfo(vmessLikeEndpoint, client, protocol, nodeID)
+}
+
+func resolveAnyTLSCertInfo(endpoint *anyTLSEndpoint, client *Client, protocol string, nodeID int) *CertInfo {
+	host := strings.TrimSpace(endpoint.ConnectHost)
+	vmessLikeEndpoint := &vmessEndpoint{
+		ListenIP:   host,
+		Host:       host,
+		ServerName: host,
 	}
 	return resolveCertInfo(vmessLikeEndpoint, client, protocol, nodeID)
 }
