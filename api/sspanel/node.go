@@ -522,6 +522,7 @@ func buildModMUAnyTLSNodeInfo(client *Client, data *modMUNodeData, routes []Rout
 		ListenIP:        listenIP,
 		ServerPort:      endpoint.ListenPort,
 		Routes:          cloneRoutes(routes),
+		PaddingScheme:   append([]string(nil), client.AnyTLSPaddingScheme...),
 		Network:         "tcp",
 		NetworkSettings: networkSettings,
 		Tls:             Tls,

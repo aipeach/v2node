@@ -101,14 +101,16 @@ type NodeConfig struct {
 	PanelType           string `mapstructure:"PanelType"`
 	APIHost             string `mapstructure:"ApiHost"`
 	NodeID              int
-	NodeType            string `mapstructure:"NodeType"`
-	SSRSinglePortMode   string `mapstructure:"-"`
-	Key                 string `mapstructure:"ApiKey"`
-	Timeout             int    `mapstructure:"Timeout"`
-	ListenIP            string `mapstructure:"ListenIP"`
-	MUSuffix            string `mapstructure:"mu_suffix"`
-	MURegex             string `mapstructure:"mu_regex"`
-	SSObfsUDP           bool   `mapstructure:"ss_obfs_udp"`
+	NodeType            string   `mapstructure:"NodeType"`
+	SSRSinglePortMode   string   `mapstructure:"-"`
+	Key                 string   `mapstructure:"ApiKey"`
+	Timeout             int      `mapstructure:"Timeout"`
+	ListenIP            string   `mapstructure:"ListenIP"`
+	MUSuffix            string   `mapstructure:"mu_suffix"`
+	MURegex             string   `mapstructure:"mu_regex"`
+	SSObfsUDP           bool     `mapstructure:"ss_obfs_udp"`
+	AnyTLSPaddingScheme []string `mapstructure:"AnyTLSPaddingScheme"`
+	AnyTLSPaddingFile   string   `mapstructure:"AnyTLSPaddingSchemeFile"`
 	CertConfig          *CertConfig
 	EnableFallback      bool            `mapstructure:"EnableFallback"`
 	FallbackObject      *FallbackObject `mapstructure:"FallbackObject"`
@@ -129,6 +131,8 @@ type nodeConfigSource struct {
 	MUSuffix            string          `mapstructure:"mu_suffix"`
 	MURegex             string          `mapstructure:"mu_regex"`
 	SSObfsUDP           bool            `mapstructure:"ss_obfs_udp"`
+	AnyTLSPaddingScheme []string        `mapstructure:"AnyTLSPaddingScheme"`
+	AnyTLSPaddingFile   string          `mapstructure:"AnyTLSPaddingSchemeFile"`
 	CertConfig          *CertConfig     `mapstructure:"CertConfig"`
 	EnableFallback      bool            `mapstructure:"EnableFallback"`
 	FallbackObject      *FallbackObject `mapstructure:"FallbackObject"`
@@ -322,6 +326,9 @@ func (p *Conf) LoadFromPath(filePath string) error {
 	p.GlobalCertConfig = globalCertConfig
 	for i := range p.NodeConfigs {
 		normalizeNodeCertConfig(&p.NodeConfigs[i], configDir)
+		if err := normalizeNodeAnyTLSPaddingConfig(&p.NodeConfigs[i], configDir); err != nil {
+			return fmt.Errorf("invalid node[%d] anytls padding scheme config: %w", i, err)
+		}
 		p.NodeConfigs[i].GlobalCertConfig = cloneCertConfig(globalCertConfig)
 	}
 	if p.DNS.File != "" && !filepath.IsAbs(p.DNS.File) {
@@ -424,6 +431,8 @@ func expandNodeConfigs(sources []nodeConfigSource) ([]NodeConfig, error) {
 				MUSuffix:            source.MUSuffix,
 				MURegex:             source.MURegex,
 				SSObfsUDP:           source.SSObfsUDP,
+				AnyTLSPaddingScheme: append([]string(nil), source.AnyTLSPaddingScheme...),
+				AnyTLSPaddingFile:   strings.TrimSpace(source.AnyTLSPaddingFile),
 				CertConfig:          certConfig,
 				EnableFallback:      source.EnableFallback,
 				FallbackObject:      normalizeFallbackObject(source.FallbackObject),
@@ -569,6 +578,54 @@ func normalizeNodeCertConfig(node *NodeConfig, configDir string) {
 		certConfig.KeyFile = node.KeyFile
 	}
 	node.CertConfig = certConfig
+}
+
+func normalizeNodeAnyTLSPaddingConfig(node *NodeConfig, configDir string) error {
+	if node == nil {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(node.NodeType)) != "anytls" {
+		node.AnyTLSPaddingScheme = nil
+		node.AnyTLSPaddingFile = ""
+		return nil
+	}
+
+	var lines []string
+
+	node.AnyTLSPaddingFile = strings.TrimSpace(node.AnyTLSPaddingFile)
+	if node.AnyTLSPaddingFile != "" {
+		if !filepath.IsAbs(node.AnyTLSPaddingFile) {
+			node.AnyTLSPaddingFile = filepath.Join(configDir, node.AnyTLSPaddingFile)
+		}
+		data, err := os.ReadFile(node.AnyTLSPaddingFile)
+		if err != nil {
+			return fmt.Errorf("read file %q: %w", node.AnyTLSPaddingFile, err)
+		}
+		lines = appendNormalizedPaddingSchemeLines(lines, string(data))
+	}
+
+	for _, line := range node.AnyTLSPaddingScheme {
+		lines = appendNormalizedPaddingSchemeLines(lines, line)
+	}
+	if len(lines) == 0 {
+		node.AnyTLSPaddingScheme = nil
+		return nil
+	}
+	node.AnyTLSPaddingScheme = lines
+	return nil
+}
+
+func appendNormalizedPaddingSchemeLines(dst []string, raw string) []string {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	raw = strings.ReplaceAll(raw, "\r", "\n")
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		dst = append(dst, line)
+	}
+	return dst
 }
 
 func parseNodeIDs(raw interface{}) ([]int, error) {
