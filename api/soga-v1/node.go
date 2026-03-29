@@ -556,6 +556,8 @@ func attachTLS(common *CommonNode, node *NodeInfo, c *Client, defaultDomain stri
 		Provider:         cert.Provider,
 		DNSEnv:           dnsEnvToString(cert.DNSEnv),
 		RejectUnknownSni: boolToString(cert.RejectUnknownSni),
+		EchServerKeys:    cert.EchServerKeys,
+		EchForceQuery:    cert.EchForceQuery,
 	}
 	common.CertInfo = cert
 	if global := resolveGlobalCertInfo(c, cert.CertDomain); global != nil {
@@ -579,6 +581,8 @@ func resolveCertInfo(c *Client, defaultDomain string, protocol string) *CertInfo
 	email := ""
 	dnsEnv := map[string]string{}
 	rejectUnknownSni := false
+	echServerKeys := ""
+	echForceQuery := ""
 
 	if c.CertConfig != nil {
 		local := c.CertConfig
@@ -614,6 +618,16 @@ func resolveCertInfo(c *Client, defaultDomain string, protocol string) *CertInfo
 			}
 		}
 		rejectUnknownSni = local.RejectUnknownSni
+		echServerKeys = strings.TrimSpace(local.EchServerKeys)
+		echForceQuery = strings.TrimSpace(local.EchForceQuery)
+	}
+	if c.GlobalCertConfig != nil {
+		if echServerKeys == "" {
+			echServerKeys = strings.TrimSpace(c.GlobalCertConfig.EchServerKeys)
+		}
+		if echForceQuery == "" {
+			echForceQuery = strings.TrimSpace(c.GlobalCertConfig.EchForceQuery)
+		}
 	}
 
 	if certFile == "" {
@@ -633,6 +647,8 @@ func resolveCertInfo(c *Client, defaultDomain string, protocol string) *CertInfo
 		DNSEnv:           dnsEnv,
 		Provider:         provider,
 		RejectUnknownSni: rejectUnknownSni,
+		EchServerKeys:    echServerKeys,
+		EchForceQuery:    echForceQuery,
 	}
 }
 
@@ -686,6 +702,8 @@ func resolveGlobalCertInfo(c *Client, defaultDomain string) *CertInfo {
 		DNSEnv:           dnsEnv,
 		Provider:         strings.TrimSpace(global.Provider),
 		RejectUnknownSni: global.RejectUnknownSni,
+		EchServerKeys:    strings.TrimSpace(global.EchServerKeys),
+		EchForceQuery:    strings.TrimSpace(global.EchForceQuery),
 	}
 }
 

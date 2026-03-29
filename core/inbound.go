@@ -140,6 +140,8 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 			in.StreamSetting.TLSSettings = &coreConf.TLSConfig{
 				Certs:            certs,
 				RejectUnknownSNI: nodeInfo.Common.CertInfo.RejectUnknownSni,
+				ECHServerKeys:    strings.TrimSpace(nodeInfo.Common.TlsSettings.EchServerKeys),
+				ECHForceQuery:    strings.TrimSpace(nodeInfo.Common.TlsSettings.EchForceQuery),
 			}
 			if nodeInfo.Type == "hysteria2" || nodeInfo.Type == "tuic" {
 				alpnList := &coreConf.StringList{"h3"}

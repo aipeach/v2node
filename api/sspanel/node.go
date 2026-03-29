@@ -107,6 +107,8 @@ type TlsSettings struct {
 	Provider         string `json:"provider"`
 	DNSEnv           string `json:"dns_env"`
 	RejectUnknownSni string `json:"reject_unknown_sni"`
+	EchServerKeys    string `json:"echServerKeys"`
+	EchForceQuery    string `json:"echForceQuery"`
 }
 
 type CertInfo struct {
@@ -119,6 +121,8 @@ type CertInfo struct {
 	DNSEnv           map[string]string
 	Provider         string
 	RejectUnknownSni bool
+	EchServerKeys    string
+	EchForceQuery    string
 }
 
 type EncSettings struct {
@@ -401,6 +405,8 @@ func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route
 			Provider:         certInfo.Provider,
 			DNSEnv:           dnsEnvToString(certInfo.DNSEnv),
 			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
+			EchServerKeys:    certInfo.EchServerKeys,
+			EchForceQuery:    certInfo.EchForceQuery,
 		}
 		common.CertInfo = certInfo
 		if globalCertInfo := resolveGlobalCertInfo(client, certInfo.CertDomain); globalCertInfo != nil {
@@ -456,6 +462,8 @@ func buildModMUTrojanNodeInfo(client *Client, data *modMUNodeData, routes []Rout
 			Provider:         certInfo.Provider,
 			DNSEnv:           dnsEnvToString(certInfo.DNSEnv),
 			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
+			EchServerKeys:    certInfo.EchServerKeys,
+			EchForceQuery:    certInfo.EchForceQuery,
 		},
 		CertInfo: certInfo,
 		BaseConfig: &BaseConfig{
@@ -535,6 +543,8 @@ func buildModMUAnyTLSNodeInfo(client *Client, data *modMUNodeData, routes []Rout
 			Provider:         certInfo.Provider,
 			DNSEnv:           dnsEnvToString(certInfo.DNSEnv),
 			RejectUnknownSni: boolToString(certInfo.RejectUnknownSni),
+			EchServerKeys:    certInfo.EchServerKeys,
+			EchForceQuery:    certInfo.EchForceQuery,
 		},
 		CertInfo: certInfo,
 		BaseConfig: &BaseConfig{
@@ -1014,6 +1024,14 @@ func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, n
 	email := strings.TrimSpace(endpoint.ExtraParams["email"])
 	dnsEnv := parseDNSEnv(strings.TrimSpace(endpoint.ExtraParams["dns_env"]))
 	rejectUnknownSni := parseBool(endpoint.ExtraParams["reject_unknown_sni"])
+	echServerKeys := strings.TrimSpace(endpoint.ExtraParams["echserverkeys"])
+	if echServerKeys == "" {
+		echServerKeys = strings.TrimSpace(endpoint.ExtraParams["ech_server_keys"])
+	}
+	echForceQuery := strings.TrimSpace(endpoint.ExtraParams["echforcequery"])
+	if echForceQuery == "" {
+		echForceQuery = strings.TrimSpace(endpoint.ExtraParams["ech_force_query"])
+	}
 
 	if client.CertFile != "" {
 		certFile = strings.TrimSpace(client.CertFile)
@@ -1056,6 +1074,20 @@ func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, n
 			}
 		}
 		rejectUnknownSni = local.RejectUnknownSni
+		if v := strings.TrimSpace(local.EchServerKeys); v != "" {
+			echServerKeys = v
+		}
+		if v := strings.TrimSpace(local.EchForceQuery); v != "" {
+			echForceQuery = v
+		}
+	}
+	if client.GlobalCertConfig != nil {
+		if echServerKeys == "" {
+			echServerKeys = strings.TrimSpace(client.GlobalCertConfig.EchServerKeys)
+		}
+		if echForceQuery == "" {
+			echForceQuery = strings.TrimSpace(client.GlobalCertConfig.EchForceQuery)
+		}
 	}
 
 	if certFile == "" {
@@ -1075,6 +1107,8 @@ func resolveCertInfo(endpoint *vmessEndpoint, client *Client, protocol string, n
 		DNSEnv:           dnsEnv,
 		Provider:         provider,
 		RejectUnknownSni: rejectUnknownSni,
+		EchServerKeys:    echServerKeys,
+		EchForceQuery:    echForceQuery,
 	}
 }
 
@@ -1193,6 +1227,8 @@ func resolveGlobalCertInfo(client *Client, defaultDomain string) *CertInfo {
 		DNSEnv:           dnsEnv,
 		Provider:         strings.TrimSpace(global.Provider),
 		RejectUnknownSni: global.RejectUnknownSni,
+		EchServerKeys:    strings.TrimSpace(global.EchServerKeys),
+		EchForceQuery:    strings.TrimSpace(global.EchForceQuery),
 	}
 }
 

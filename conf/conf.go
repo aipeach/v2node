@@ -87,6 +87,8 @@ type CertConfig struct {
 	Email            string            `mapstructure:"Email"`
 	DNSEnv           map[string]string `mapstructure:"DNSEnv"`
 	RejectUnknownSni bool              `mapstructure:"RejectUnknownSni"`
+	EchServerKeys    string            `mapstructure:"echServerKeys"`
+	EchForceQuery    string            `mapstructure:"echForceQuery"`
 }
 
 type FallbackObject struct {
@@ -531,6 +533,8 @@ func normalizeCertConfig(certConfig *CertConfig, configDir string) *CertConfig {
 	certConfig.KeyType = strings.ToLower(strings.TrimSpace(certConfig.KeyType))
 	certConfig.Provider = strings.TrimSpace(certConfig.Provider)
 	certConfig.Email = strings.TrimSpace(certConfig.Email)
+	certConfig.EchServerKeys = strings.TrimSpace(certConfig.EchServerKeys)
+	certConfig.EchForceQuery = strings.TrimSpace(certConfig.EchForceQuery)
 	certConfig.DNSEnv = normalizeDNSEnv(certConfig.DNSEnv)
 
 	if configDir != "" {

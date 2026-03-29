@@ -187,6 +187,13 @@ func sanitizeInboundJSONValue(value interface{}) (interface{}, bool) {
 		for k, item := range v {
 			if cleaned, ok := sanitizeInboundJSONValue(item); ok {
 				out[k] = cleaned
+				continue
+			}
+			// Keep ECH fields in dump output even when configured as empty strings.
+			if (k == "echServerKeys" || k == "echForceQuery") && item != nil {
+				if s, ok := item.(string); ok {
+					out[k] = s
+				}
 			}
 		}
 		normalizeAliasField(out, "protocolParam", "protocolparam")

@@ -104,6 +104,8 @@ type TlsSettings struct {
 	Provider         string `json:"provider"`
 	DNSEnv           string `json:"dns_env"`
 	RejectUnknownSni string `json:"reject_unknown_sni"`
+	EchServerKeys    string `json:"echServerKeys"`
+	EchForceQuery    string `json:"echForceQuery"`
 }
 
 type CertInfo struct {
