@@ -86,6 +86,13 @@ type sogaAnyTLSConfig struct {
 	PaddingScheme []string `json:"padding_scheme"`
 }
 
+type sogaECHConfig struct {
+	Key            string `json:"key"`
+	ForceQuery     string `json:"force_query"`
+	ForceQueryAlt  string `json:"forceQuery"`
+	ForceQueryAlt2 string `json:"query"`
+}
+
 type sogaAuditRuleRow struct {
 	ID   any    `json:"id"`
 	Rule string `json:"rule"`
@@ -243,6 +250,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 	}
 
 	nodeType := normalizeNodeType(c.NodeType)
+	remoteECH := extractSogaECHConfig(data.Config)
 	node := &NodeInfo{
 		Id:           c.NodeId,
 		Type:         nodeType,
@@ -263,7 +271,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 			return nil, err
 		}
 		if strings.EqualFold(strings.TrimSpace(cfg.TlsType), "tls") {
-			attachTLS(common, node, c, chooseCertDomain(cfg.ServerNames, common.ListenIP), "vmess")
+			attachTLS(common, node, c, chooseCertDomain(cfg.ServerNames, common.ListenIP), "vmess", remoteECH)
 		}
 	case "vless":
 		cfg := &sogaStreamNodeConfig{}
@@ -279,7 +287,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 		case "reality":
 			applyReality(common, node, cfg)
 		case "tls":
-			attachTLS(common, node, c, chooseCertDomain(cfg.ServerNames, common.ListenIP), "vless")
+			attachTLS(common, node, c, chooseCertDomain(cfg.ServerNames, common.ListenIP), "vless", remoteECH)
 		}
 		if c.EnableFallback {
 			fb, err := buildNodeFallbackObject(c.FallbackObject)
@@ -297,7 +305,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 		if err := applyStreamNode(common, "trojan", cfg, c.AcceptProxyProto); err != nil {
 			return nil, err
 		}
-		attachTLS(common, node, c, chooseCertDomain(cfg.ServerNames, common.ListenIP), "trojan")
+		attachTLS(common, node, c, chooseCertDomain(cfg.ServerNames, common.ListenIP), "trojan", remoteECH)
 		if c.EnableFallback {
 			fb, err := buildNodeFallbackObject(c.FallbackObject)
 			if err != nil {
@@ -370,7 +378,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 		if common.UpMbps == 0 && common.DownMbps == 0 {
 			common.Ignore_Client_Bandwidth = true
 		}
-		attachTLS(common, node, c, common.ListenIP, "hysteria2")
+		attachTLS(common, node, c, common.ListenIP, "hysteria2", remoteECH)
 	case "anytls":
 		cfg := &sogaAnyTLSConfig{}
 		if err := json.Unmarshal(data.Config, cfg); err != nil {
@@ -383,7 +391,7 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 		common.ServerPort = cfg.Port
 		common.Network = "tcp"
 		common.PaddingScheme = append([]string(nil), cfg.PaddingScheme...)
-		attachTLS(common, node, c, common.ListenIP, "anytls")
+		attachTLS(common, node, c, common.ListenIP, "anytls", remoteECH)
 	default:
 		return nil, fmt.Errorf("unsupported node type: %s", nodeType)
 	}
@@ -541,11 +549,11 @@ func applyReality(common *CommonNode, node *NodeInfo, cfg *sogaStreamNodeConfig)
 	node.Security = Reality
 }
 
-func attachTLS(common *CommonNode, node *NodeInfo, c *Client, defaultDomain string, protocol string) {
+func attachTLS(common *CommonNode, node *NodeInfo, c *Client, defaultDomain string, protocol string, remoteECH *sogaECHConfig) {
 	if common == nil || node == nil || c == nil {
 		return
 	}
-	cert := resolveCertInfo(c, defaultDomain, protocol)
+	cert := resolveCertInfo(c, defaultDomain, protocol, remoteECH)
 	common.Tls = Tls
 	common.TlsSettings = TlsSettings{
 		ServerName:       cert.CertDomain,
@@ -568,7 +576,7 @@ func attachTLS(common *CommonNode, node *NodeInfo, c *Client, defaultDomain stri
 	node.Security = Tls
 }
 
-func resolveCertInfo(c *Client, defaultDomain string, protocol string) *CertInfo {
+func resolveCertInfo(c *Client, defaultDomain string, protocol string, remoteECH *sogaECHConfig) *CertInfo {
 	certMode := "self"
 	certDomain := strings.TrimSpace(defaultDomain)
 	if certDomain == "" {
@@ -629,6 +637,21 @@ func resolveCertInfo(c *Client, defaultDomain string, protocol string) *CertInfo
 			echForceQuery = strings.TrimSpace(c.GlobalCertConfig.EchForceQuery)
 		}
 	}
+	if remoteECH != nil {
+		if v := strings.TrimSpace(remoteECH.Key); v != "" {
+			echServerKeys = v
+		}
+		forceQuery := strings.TrimSpace(remoteECH.ForceQuery)
+		if forceQuery == "" {
+			forceQuery = strings.TrimSpace(remoteECH.ForceQueryAlt)
+		}
+		if forceQuery == "" {
+			forceQuery = strings.TrimSpace(remoteECH.ForceQueryAlt2)
+		}
+		if forceQuery != "" {
+			echForceQuery = forceQuery
+		}
+	}
 
 	if certFile == "" {
 		certFile = filepath.Join("/etc/v2node/", protocol+strconv.Itoa(c.NodeId)+".cer")
@@ -650,6 +673,27 @@ func resolveCertInfo(c *Client, defaultDomain string, protocol string) *CertInfo
 		EchServerKeys:    echServerKeys,
 		EchForceQuery:    echForceQuery,
 	}
+}
+
+func extractSogaECHConfig(raw json.RawMessage) *sogaECHConfig {
+	if len(raw) == 0 {
+		return nil
+	}
+	payload := struct {
+		ECH *sogaECHConfig `json:"ech"`
+	}{}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ECH == nil {
+		return nil
+	}
+	cfg := payload.ECH
+	cfg.Key = strings.TrimSpace(cfg.Key)
+	cfg.ForceQuery = strings.TrimSpace(cfg.ForceQuery)
+	cfg.ForceQueryAlt = strings.TrimSpace(cfg.ForceQueryAlt)
+	cfg.ForceQueryAlt2 = strings.TrimSpace(cfg.ForceQueryAlt2)
+	if cfg.Key == "" && cfg.ForceQuery == "" && cfg.ForceQueryAlt == "" && cfg.ForceQueryAlt2 == "" {
+		return nil
+	}
+	return cfg
 }
 
 func resolveGlobalCertInfo(c *Client, defaultDomain string) *CertInfo {
