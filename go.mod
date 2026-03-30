@@ -12,7 +12,7 @@ require (
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/viper v1.19.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
-	github.com/xtls/xray-core v1.260323.0
+	github.com/xtls/xray-core v1.260327.0
 	golang.org/x/sys v0.42.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
@@ -233,4 +233,4 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/xtls/xray-core v1.260323.0 => ../Xray-core
+replace github.com/xtls/xray-core v1.260327.0 => ../Xray-core
