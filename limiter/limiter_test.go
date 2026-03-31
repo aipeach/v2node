@@ -15,7 +15,7 @@ func TestUpdateDynamicSpeedLimitByUIDFastPath(t *testing.T) {
 		{Id: 1001, Uuid: "uuid-1", SpeedLimit: 100},
 		{Id: 1002, Uuid: "uuid-2", SpeedLimit: 100},
 	}
-	l := AddLimiter(tag, users, map[int]int{})
+	l := AddLimiter("v2ray", tag, users, map[int]int{})
 	defer DeleteLimiter(tag)
 
 	expire := time.Now().Add(2 * time.Minute).Truncate(time.Second)
@@ -44,7 +44,7 @@ func TestUpdateDynamicSpeedLimitByUIDStaleIndexFallback(t *testing.T) {
 		{Id: 2001, Uuid: "uuid-a", SpeedLimit: 100},
 		{Id: 2002, Uuid: "uuid-b", SpeedLimit: 100},
 	}
-	l := AddLimiter(tag, users, map[int]int{})
+	l := AddLimiter("v2ray", tag, users, map[int]int{})
 	defer DeleteLimiter(tag)
 
 	l.UIDtoTagUUID.Store(2002, "bad-key")

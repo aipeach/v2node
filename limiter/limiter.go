@@ -3,7 +3,6 @@ package limiter
 import (
 	"errors"
 	"net"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,9 +30,8 @@ func SetUserIPLimitCIDRPrefix(v4, v6 int) {
 }
 
 type Limiter struct {
-	DomainRules   []*regexp.Regexp
-	ProtocolRules []string
-	SpeedLimit    int
+	Nodetype      string         // Node type, e.g. "v2ray", "trojan", "shadowsocks"
+	SpeedLimit    int            // Node speed limit in Mbps
 	UserOnlineIP  *sync.Map      // Key: TagUUID, value: {Key: Ip, value: Uid}
 	OldUserOnline *sync.Map      // Key: Ip, value: Uid
 	UUIDtoUID     map[string]int // Key: UUID, value: Uid
@@ -52,8 +50,9 @@ type UserLimitInfo struct {
 	OverLimit         bool
 }
 
-func AddLimiter(tag string, users []panel.UserInfo, aliveList map[int]int) *Limiter {
-	info := &Limiter{
+func AddLimiter(nodetype string, tag string, users []panel.UserInfo, aliveList map[int]int) *Limiter {
+	l := &Limiter{
+		Nodetype:      nodetype,
 		UserOnlineIP:  new(sync.Map),
 		UserLimitInfo: new(sync.Map),
 		SpeedLimiter:  new(sync.Map),
@@ -74,14 +73,14 @@ func AddLimiter(tag string, users []panel.UserInfo, aliveList map[int]int) *Limi
 		}
 		userLimit.OverLimit = false
 		taguuid := format.UserTag(tag, users[i].Uuid)
-		info.UserLimitInfo.Store(taguuid, userLimit)
-		info.UIDtoTagUUID.Store(users[i].Id, taguuid)
+		l.UserLimitInfo.Store(taguuid, userLimit)
+		l.UIDtoTagUUID.Store(users[i].Id, taguuid)
 	}
-	info.UUIDtoUID = uuidmap
+	l.UUIDtoUID = uuidmap
 	limitLock.Lock()
-	limiter[tag] = info
+	limiter[tag] = l
 	limitLock.Unlock()
-	return info
+	return l
 }
 
 func GetLimiter(tag string) (info *Limiter, err error) {
@@ -184,7 +183,7 @@ func (l *Limiter) lookupUserLimitByUID(uid int) (string, *UserLimitInfo, bool) {
 	return taguuid, foundInfo, true
 }
 
-func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool) (dynamicBucket *rate.DynamicBucket, Reject bool) {
+func (l *Limiter) CheckLimit(taguuid string, ip string, noUDPsource bool) (dynamicBucket *rate.DynamicBucket, Reject bool) {
 	// check if ipv4 mapped ipv6
 	ip = strings.TrimPrefix(ip, "::ffff:")
 	ip = normalizeUserIPByPrefix(ip)
@@ -217,7 +216,7 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 	} else {
 		return nil, true
 	}
-	if noSSUDP {
+	if noUDPsource || l.Nodetype == "hysteria2" {
 		// Store online user for device limit
 		newipMap := new(sync.Map)
 		newipMap.Store(ip, uid)
