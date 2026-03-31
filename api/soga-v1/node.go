@@ -526,9 +526,10 @@ func applyReality(common *CommonNode, node *NodeInfo, cfg *sogaStreamNodeConfig)
 	if len(cfg.ServerNames) > 0 {
 		serverName = strings.TrimSpace(cfg.ServerNames[0])
 	}
+	shortIDs := sanitizeRealityShortIDs(cfg.ShortIDs)
 	shortID := ""
-	if len(cfg.ShortIDs) > 0 {
-		shortID = strings.TrimSpace(cfg.ShortIDs[0])
+	if len(shortIDs) > 0 {
+		shortID = shortIDs[0]
 	}
 	destHost, destPort := splitDest(strings.TrimSpace(cfg.Dest))
 	if destPort == "" {
@@ -543,10 +544,34 @@ func applyReality(common *CommonNode, node *NodeInfo, cfg *sogaStreamNodeConfig)
 		Dest:             destHost,
 		ServerPort:       destPort,
 		ShortId:          shortID,
+		ShortIds:         shortIDs,
 		PrivateKey:       strings.TrimSpace(cfg.PrivateKey),
 		RejectUnknownSni: "0",
 	}
 	node.Security = Reality
+}
+
+func sanitizeRealityShortIDs(shortIDs []string) []string {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(shortIDs))
+	seen := make(map[string]struct{}, len(shortIDs))
+	for _, raw := range shortIDs {
+		shortID := strings.TrimSpace(raw)
+		if shortID == "" {
+			continue
+		}
+		if _, ok := seen[shortID]; ok {
+			continue
+		}
+		seen[shortID] = struct{}{}
+		result = append(result, shortID)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func attachTLS(common *CommonNode, node *NodeInfo, c *Client, defaultDomain string, protocol string, remoteECH *sogaECHConfig) {

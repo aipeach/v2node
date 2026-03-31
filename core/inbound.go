@@ -166,13 +166,17 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal reality dest error: %s", err)
 		}
+		shortIDs := sanitizeRealityShortIDs(v.TlsSettings.ShortIds)
+		if len(shortIDs) == 0 {
+			shortIDs = []string{strings.TrimSpace(v.TlsSettings.ShortId)}
+		}
 		in.StreamSetting.REALITYSettings = &coreConf.REALITYConfig{
 			Dest:        d,
 			Xver:        xver,
 			Show:        false,
 			ServerNames: []string{v.TlsSettings.ServerName},
 			PrivateKey:  v.TlsSettings.PrivateKey,
-			ShortIds:    []string{v.TlsSettings.ShortId},
+			ShortIds:    shortIDs,
 			Mldsa65Seed: v.TlsSettings.Mldsa65Seed,
 		}
 	default:
@@ -184,6 +188,29 @@ func buildInbound(nodeInfo *panel.NodeInfo, tag string, users []panel.UserInfo) 
 		return nil, nil, err
 	}
 	return built, in, nil
+}
+
+func sanitizeRealityShortIDs(shortIDs []string) []string {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(shortIDs))
+	seen := make(map[string]struct{}, len(shortIDs))
+	for _, raw := range shortIDs {
+		shortID := strings.TrimSpace(raw)
+		if shortID == "" {
+			continue
+		}
+		if _, ok := seen[shortID]; ok {
+			continue
+		}
+		seen[shortID] = struct{}{}
+		result = append(result, shortID)
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func appendTLSCert(certs []*coreConf.TLSCertConfig, seen map[string]struct{}, certInfo *panel.CertInfo) []*coreConf.TLSCertConfig {

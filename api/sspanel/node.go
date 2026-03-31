@@ -93,22 +93,23 @@ type BaseConfig struct {
 }
 
 type TlsSettings struct {
-	ServerName       string `json:"server_name"`
-	Dest             string `json:"dest"`
-	ServerPort       string `json:"server_port"`
-	ShortId          string `json:"short_id"`
-	PrivateKey       string `json:"private_key"`
-	Mldsa65Seed      string `json:"mldsa65Seed"`
-	Xver             uint64 `json:"xver,string"`
-	CertMode         string `json:"cert_mode"`
-	CertFile         string `json:"cert_file"`
-	KeyFile          string `json:"key_file"`
-	KeyType          string `json:"key_type"`
-	Provider         string `json:"provider"`
-	DNSEnv           string `json:"dns_env"`
-	RejectUnknownSni string `json:"reject_unknown_sni"`
-	EchServerKeys    string `json:"echServerKeys"`
-	EchForceQuery    string `json:"echForceQuery"`
+	ServerName       string   `json:"server_name"`
+	Dest             string   `json:"dest"`
+	ServerPort       string   `json:"server_port"`
+	ShortId          string   `json:"short_id"`
+	ShortIds         []string `json:"short_ids,omitempty"`
+	PrivateKey       string   `json:"private_key"`
+	Mldsa65Seed      string   `json:"mldsa65Seed"`
+	Xver             uint64   `json:"xver,string"`
+	CertMode         string   `json:"cert_mode"`
+	CertFile         string   `json:"cert_file"`
+	KeyFile          string   `json:"key_file"`
+	KeyType          string   `json:"key_type"`
+	Provider         string   `json:"provider"`
+	DNSEnv           string   `json:"dns_env"`
+	RejectUnknownSni string   `json:"reject_unknown_sni"`
+	EchServerKeys    string   `json:"echServerKeys"`
+	EchForceQuery    string   `json:"echForceQuery"`
 }
 
 type CertInfo struct {
