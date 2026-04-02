@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	panel "github.com/wyx2685/v2node/api/v2board"
 	"github.com/wyx2685/v2node/conf"
 	"github.com/xtls/xray-core/app/dns"
@@ -63,6 +64,19 @@ func hasOutboundWithTag(list []*core.OutboundHandlerConfig, tag string) bool {
 	return false
 }
 
+func buildDefaultDNSConfig(queryStrategy string) *coreConf.DNSConfig {
+	return &coreConf.DNSConfig{
+		Servers: []*coreConf.NameServerConfig{
+			{
+				Address: &coreConf.Address{
+					Address: xnet.ParseAddress("localhost"),
+				},
+			},
+		},
+		QueryStrategy: queryStrategy,
+	}
+}
+
 func buildBaseOutbounds(c *conf.Conf) ([]*core.OutboundHandlerConfig, error) {
 	autoOutIP := c != nil && c.AutoOutIP
 	if c != nil && strings.TrimSpace(c.Outbounds.File) != "" {
@@ -105,54 +119,80 @@ func buildBaseRouting(c *conf.Conf) (*coreConf.RouterConfig, error) {
 
 func GetCustomConfig(c *conf.Conf, infos []*panel.NodeInfo) (*dns.Config, []*core.OutboundHandlerConfig, *router.Config, error) {
 	geoData := newGeoDataResolver(c)
+	remoteRules := collectRemoteXrayRules(infos)
 	auditWhiteList, err := loadAuditWhiteListConfig(c)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	//dns
+	// dns: remote > local file > default
 	queryStrategy := "UseIPv4v6"
 	if !hasPublicIPv6() {
 		queryStrategy = "UseIPv4"
 	}
-	coreDnsConfig := &coreConf.DNSConfig{
-		Servers: []*coreConf.NameServerConfig{
-			{
-				Address: &coreConf.Address{
-					Address: xnet.ParseAddress("localhost"),
-				},
-			},
-		},
-		QueryStrategy: queryStrategy,
+	coreDnsConfig := buildDefaultDNSConfig(queryStrategy)
+	loadedRemoteDNS := false
+	if len(remoteRules.DNS) > 0 {
+		customDNSConfig, err := loadDNSConfigFromRaw(remoteRules.DNS)
+		if err != nil {
+			log.WithError(err).Warn("parse remote xray dns rules failed, fallback to local/default")
+		} else {
+			coreDnsConfig = customDNSConfig
+			loadedRemoteDNS = true
+		}
 	}
-	if c != nil && strings.TrimSpace(c.DNS.File) != "" {
+	if !loadedRemoteDNS && c != nil && strings.TrimSpace(c.DNS.File) != "" {
 		customDNSConfig, err := loadDNSConfig(c.DNS.File)
 		if err != nil {
 			return nil, nil, nil, err
 		}
 		coreDnsConfig = customDNSConfig
-		if strings.TrimSpace(coreDnsConfig.QueryStrategy) == "" {
-			coreDnsConfig.QueryStrategy = queryStrategy
-		}
-		if len(coreDnsConfig.Servers) == 0 {
-			coreDnsConfig.Servers = []*coreConf.NameServerConfig{
-				{
-					Address: &coreConf.Address{
-						Address: xnet.ParseAddress("localhost"),
-					},
-				},
-			}
-		}
 	}
-	//outbound
-	coreOutboundConfig, err := buildBaseOutbounds(c)
-	if err != nil {
-		return nil, nil, nil, err
+	if strings.TrimSpace(coreDnsConfig.QueryStrategy) == "" {
+		coreDnsConfig.QueryStrategy = queryStrategy
+	}
+	if len(coreDnsConfig.Servers) == 0 {
+		coreDnsConfig.Servers = []*coreConf.NameServerConfig{
+			{
+				Address: &coreConf.Address{
+					Address: xnet.ParseAddress("localhost"),
+				},
+			},
+		}
 	}
 
-	//route
-	coreRouterConfig, err := buildBaseRouting(c)
-	if err != nil {
-		return nil, nil, nil, err
+	// outbound: remote > local file > default
+	coreOutboundConfig := []*core.OutboundHandlerConfig(nil)
+	if len(remoteRules.Outbounds) > 0 {
+		autoOutIP := c != nil && c.AutoOutIP
+		remoteOutbounds, err := loadOutboundsConfigFromRaw(remoteRules.Outbounds, autoOutIP)
+		if err != nil {
+			log.WithError(err).Warn("parse remote xray outbounds rules failed, fallback to local/default")
+		} else {
+			coreOutboundConfig = remoteOutbounds
+		}
+	}
+	if len(coreOutboundConfig) == 0 {
+		coreOutboundConfig, err = buildBaseOutbounds(c)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
+	// route: remote > local file > default
+	coreRouterConfig := (*coreConf.RouterConfig)(nil)
+	if len(remoteRules.Routing) > 0 {
+		remoteRouting, err := loadRoutingConfigFromRaw(remoteRules.Routing)
+		if err != nil {
+			log.WithError(err).Warn("parse remote xray routing rules failed, fallback to local/default")
+		} else {
+			coreRouterConfig = remoteRouting
+		}
+	}
+	if coreRouterConfig == nil {
+		coreRouterConfig, err = buildBaseRouting(c)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	inboundTags := collectInboundTags(infos)
 	if len(inboundTags) > 0 {
@@ -771,6 +811,59 @@ func appendForbiddenProtocolRules(coreRouterConfig *coreConf.RouterConfig, inbou
 	}
 }
 
+type remoteXrayRules struct {
+	DNS       json.RawMessage
+	Routing   json.RawMessage
+	Outbounds json.RawMessage
+}
+
+func collectRemoteXrayRules(infos []*panel.NodeInfo) remoteXrayRules {
+	collected := remoteXrayRules{}
+	for _, info := range infos {
+		if info == nil || info.Common == nil || info.Common.XrayRules == nil {
+			continue
+		}
+		rules := info.Common.XrayRules
+		if len(rules.DNS) > 0 {
+			if len(collected.DNS) == 0 {
+				collected.DNS = append(json.RawMessage(nil), rules.DNS...)
+			} else if !rawJSONEqual(collected.DNS, rules.DNS) {
+				log.WithField("tag", info.Tag).Warn("multiple nodes provide different remote dns rules, keep first one")
+			}
+		}
+		if len(rules.Routing) > 0 {
+			if len(collected.Routing) == 0 {
+				collected.Routing = append(json.RawMessage(nil), rules.Routing...)
+			} else if !rawJSONEqual(collected.Routing, rules.Routing) {
+				log.WithField("tag", info.Tag).Warn("multiple nodes provide different remote routing rules, keep first one")
+			}
+		}
+		if len(rules.Outbounds) > 0 {
+			if len(collected.Outbounds) == 0 {
+				collected.Outbounds = append(json.RawMessage(nil), rules.Outbounds...)
+			} else if !rawJSONEqual(collected.Outbounds, rules.Outbounds) {
+				log.WithField("tag", info.Tag).Warn("multiple nodes provide different remote outbounds rules, keep first one")
+			}
+		}
+	}
+	return collected
+}
+
+func rawJSONEqual(a, b []byte) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return len(a) == 0 && len(b) == 0
+	}
+	var aCompact bytes.Buffer
+	if err := json.Compact(&aCompact, bytes.TrimSpace(a)); err != nil {
+		return bytes.Equal(bytes.TrimSpace(a), bytes.TrimSpace(b))
+	}
+	var bCompact bytes.Buffer
+	if err := json.Compact(&bCompact, bytes.TrimSpace(b)); err != nil {
+		return bytes.Equal(bytes.TrimSpace(a), bytes.TrimSpace(b))
+	}
+	return bytes.Equal(aCompact.Bytes(), bCompact.Bytes())
+}
+
 type outboundsFileConfig struct {
 	Outbounds []*coreConf.OutboundDetourConfig `json:"outbounds"`
 }
@@ -810,9 +903,20 @@ func loadDNSConfig(filePath string) (*coreConf.DNSConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read dns config file error: %w", err)
 	}
-	cfg := &coreConf.DNSConfig{}
-	if err := unmarshalJSONOrYAML(rawBytes, cfg); err != nil {
+	cfg, err := loadDNSConfigFromRaw(rawBytes)
+	if err != nil {
 		return nil, fmt.Errorf("parse dns config file %s error: %w", filePath, err)
+	}
+	return cfg, nil
+}
+
+func loadDNSConfigFromRaw(rawBytes []byte) (*coreConf.DNSConfig, error) {
+	cfg := &coreConf.DNSConfig{}
+	if err := json.Unmarshal(rawBytes, cfg); err == nil {
+		return cfg, nil
+	}
+	if err := unmarshalJSONOrYAML(rawBytes, cfg); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }
@@ -822,9 +926,19 @@ func loadRoutingConfig(filePath string) (*coreConf.RouterConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read routing config file error: %w", err)
 	}
-	cfg := &coreConf.RouterConfig{}
-	if err := unmarshalJSONOrYAML(rawBytes, cfg); err != nil {
+	cfg, err := loadRoutingConfigFromRaw(rawBytes)
+	if err != nil {
 		return nil, fmt.Errorf("parse routing config file %s error: %w", filePath, err)
+	}
+	return cfg, nil
+}
+
+func loadRoutingConfigFromRaw(rawBytes []byte) (*coreConf.RouterConfig, error) {
+	cfg := &coreConf.RouterConfig{}
+	if err := json.Unmarshal(rawBytes, cfg); err != nil {
+		if err := unmarshalJSONOrYAML(rawBytes, cfg); err != nil {
+			return nil, err
+		}
 	}
 	if isRouterConfigEmpty(cfg) {
 		wrapped := routingFileConfig{}
@@ -847,16 +961,26 @@ func loadOutboundsConfig(filePath string, autoOutIP bool) ([]*core.OutboundHandl
 	if err != nil {
 		return nil, fmt.Errorf("read outbounds config file error: %w", err)
 	}
+	result, err := loadOutboundsConfigFromRaw(rawBytes, autoOutIP)
+	if err != nil {
+		return nil, fmt.Errorf("parse outbounds config file %s error: %w", filePath, err)
+	}
+	return result, nil
+}
+
+func loadOutboundsConfigFromRaw(rawBytes []byte, autoOutIP bool) ([]*core.OutboundHandlerConfig, error) {
 	var outbounds []*coreConf.OutboundDetourConfig
-	if err := unmarshalJSONOrYAML(rawBytes, &outbounds); err != nil {
-		wrapped := outboundsFileConfig{}
-		if wrapErr := unmarshalJSONOrYAML(rawBytes, &wrapped); wrapErr != nil {
-			return nil, fmt.Errorf("parse outbounds config file %s error: %w", filePath, err)
+	if err := json.Unmarshal(rawBytes, &outbounds); err != nil {
+		if err := unmarshalJSONOrYAML(rawBytes, &outbounds); err != nil {
+			wrapped := outboundsFileConfig{}
+			if wrapErr := unmarshalJSONOrYAML(rawBytes, &wrapped); wrapErr != nil {
+				return nil, err
+			}
+			outbounds = wrapped.Outbounds
 		}
-		outbounds = wrapped.Outbounds
 	}
 	if len(outbounds) == 0 {
-		return nil, fmt.Errorf("outbounds config file %s has no outbounds", filePath)
+		return nil, fmt.Errorf("outbounds config is empty")
 	}
 	result := make([]*core.OutboundHandlerConfig, 0, len(outbounds))
 	for i, outbound := range outbounds {
@@ -866,12 +990,12 @@ func loadOutboundsConfig(filePath string, autoOutIP bool) ([]*core.OutboundHandl
 		applyAutoOutIPToOutbound(outbound, autoOutIP)
 		built, err := outbound.Build()
 		if err != nil {
-			return nil, fmt.Errorf("build outbounds config file %s item %d error: %w", filePath, i, err)
+			return nil, fmt.Errorf("build outbounds config item %d error: %w", i, err)
 		}
 		result = append(result, built)
 	}
 	if len(result) == 0 {
-		return nil, fmt.Errorf("outbounds config file %s has no valid outbounds", filePath)
+		return nil, fmt.Errorf("outbounds config has no valid outbounds")
 	}
 	return result, nil
 }

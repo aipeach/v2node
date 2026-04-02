@@ -37,6 +37,7 @@ type CommonNode struct {
 	ServerPort     int         `json:"server_port"`
 	Routes         []Route     `json:"routes"`
 	AuditWhiteList []string    `json:"audit_white_list,omitempty"`
+	XrayRules      *XrayRules  `json:"xray_rules,omitempty"`
 	BaseConfig     *BaseConfig `json:"base_config"`
 	//vless vmess trojan
 	Tls                int         `json:"tls"`
@@ -83,6 +84,12 @@ type Route struct {
 	Action      string   `json:"action"`
 	ActionValue *string  `json:"action_value"`
 	DetectRule  bool     `json:"-"`
+}
+
+type XrayRules struct {
+	DNS       json.RawMessage `json:"dns,omitempty"`
+	Routing   json.RawMessage `json:"routing,omitempty"`
+	Outbounds json.RawMessage `json:"outbounds,omitempty"`
 }
 
 type BaseConfig struct {

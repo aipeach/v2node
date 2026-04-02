@@ -31,6 +31,7 @@ func cloneCommonNodeFromSSPanel(src *sspanel.CommonNode) *CommonNode {
 		ServerPort:              src.ServerPort,
 		Routes:                  cloneRoutesFromSSPanel(src.Routes),
 		AuditWhiteList:          append([]string(nil), src.AuditWhiteList...),
+		XrayRules:               cloneXrayRulesFromSSPanel(src.XrayRules),
 		BaseConfig:              cloneBaseConfigFromSSPanel(src.BaseConfig),
 		Tls:                     src.Tls,
 		TlsSettings:             TlsSettings(src.TlsSettings),
@@ -86,6 +87,26 @@ func cloneRoutesFromSSPanel(src []sspanel.Route) []Route {
 			r.ActionValue = &value
 		}
 		dst = append(dst, r)
+	}
+	return dst
+}
+
+func cloneXrayRulesFromSSPanel(src *sspanel.XrayRules) *XrayRules {
+	if src == nil {
+		return nil
+	}
+	dst := &XrayRules{}
+	if len(src.DNS) > 0 {
+		dst.DNS = json.RawMessage(append([]byte(nil), src.DNS...))
+	}
+	if len(src.Routing) > 0 {
+		dst.Routing = json.RawMessage(append([]byte(nil), src.Routing...))
+	}
+	if len(src.Outbounds) > 0 {
+		dst.Outbounds = json.RawMessage(append([]byte(nil), src.Outbounds...))
+	}
+	if len(dst.DNS) == 0 && len(dst.Routing) == 0 && len(dst.Outbounds) == 0 {
+		return nil
 	}
 	return dst
 }

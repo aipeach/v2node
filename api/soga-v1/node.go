@@ -29,6 +29,7 @@ type TlsSettings = sspanel.TlsSettings
 type CertInfo = sspanel.CertInfo
 type EncSettings = sspanel.EncSettings
 type FallbackObject = sspanel.FallbackObject
+type XrayRules = sspanel.XrayRules
 
 type sogaNodeData struct {
 	Basic  *sogaBasicConfig `json:"basic"`
@@ -116,7 +117,12 @@ func (c *Client) GetNodeInfo() (*NodeInfo, error) {
 		whiteListChanged = false
 	}
 
-	if !nodeChanged && !routesChanged && !whiteListChanged {
+	xrayRulesChanged, err := c.refreshXrayRules()
+	if err != nil {
+		// 远程规则异常时回退本地/默认配置，保持节点继续可用。
+	}
+
+	if !nodeChanged && !routesChanged && !whiteListChanged && !xrayRulesChanged {
 		return nil, nil
 	}
 	if c.cachedNodeData == nil {
@@ -238,8 +244,9 @@ func (c *Client) buildNodeInfo(data *sogaNodeData) (*NodeInfo, error) {
 	pushInterval, pullInterval := parseNodeIntervals(data.Basic)
 
 	common := &CommonNode{
-		ListenIP: resolveListenIP(c.ListenIP),
-		Routes:   cloneRoutes(c.cachedRoutes),
+		ListenIP:  resolveListenIP(c.ListenIP),
+		Routes:    cloneRoutes(c.cachedRoutes),
+		XrayRules: cloneXrayRules(c.effectiveXrayRules),
 		BaseConfig: &BaseConfig{
 			PushInterval:           pushInterval,
 			PullInterval:           pullInterval,

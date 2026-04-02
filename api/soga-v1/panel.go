@@ -24,30 +24,35 @@ type Client struct {
 	NodeType       string
 	NodeTypeHeader string
 
-	ListenIP          string
-	SSObfsUDP         bool
-	EnableFallback    bool
-	FallbackObject    *conf.FallbackObject
-	CertConfig        *conf.CertConfig
-	GlobalCertConfig  *conf.CertConfig
-	CertFile          string
-	KeyFile           string
-	AcceptProxyProto  bool
-	startedAt         time.Time
-	lastCPUIdle       uint64
-	lastCPUTotal      uint64
-	hasCPUStat        bool
-	nodeEtag          string
-	nodeBodyHash      string
-	userEtag          string
-	auditRuleEtag     string
-	auditRuleBodyHash string
-	whiteListEtag     string
-	whiteListBodyHash string
-	cachedNodeData    *sogaNodeData
-	cachedRoutes      []sspanel.Route
-	cachedWhiteList   []string
-	AliveMap          *sspanel.AliveMap
+	ListenIP             string
+	SSObfsUDP            bool
+	EnableFallback       bool
+	FallbackObject       *conf.FallbackObject
+	CertConfig           *conf.CertConfig
+	GlobalCertConfig     *conf.CertConfig
+	CertFile             string
+	KeyFile              string
+	AcceptProxyProto     bool
+	startedAt            time.Time
+	lastCPUIdle          uint64
+	lastCPUTotal         uint64
+	hasCPUStat           bool
+	nodeEtag             string
+	nodeBodyHash         string
+	userEtag             string
+	auditRuleEtag        string
+	auditRuleBodyHash    string
+	whiteListEtag        string
+	whiteListBodyHash    string
+	xrayRulesEtag        string
+	cachedXrayRules      *sspanel.XrayRules
+	effectiveXrayRules   *sspanel.XrayRules
+	xrayRulesCachePath   string
+	xrayRulesCacheLoaded bool
+	cachedNodeData       *sogaNodeData
+	cachedRoutes         []sspanel.Route
+	cachedWhiteList      []string
+	AliveMap             *sspanel.AliveMap
 }
 
 func New(c *conf.NodeConfig) (*Client, error) {
@@ -84,24 +89,25 @@ func New(c *conf.NodeConfig) (*Client, error) {
 	})
 
 	return &Client{
-		client:           client,
-		APIHost:          c.APIHost,
-		Token:            c.Key,
-		NodeId:           c.NodeID,
-		NodeTypeRaw:      rawNodeType,
-		NodeType:         nodeType,
-		NodeTypeHeader:   headerType,
-		ListenIP:         c.ListenIP,
-		SSObfsUDP:        c.SSObfsUDP,
-		EnableFallback:   c.EnableFallback,
-		FallbackObject:   cloneConfigFallbackObject(c.FallbackObject),
-		CertConfig:       cloneCertConfig(c.CertConfig),
-		GlobalCertConfig: cloneCertConfig(c.GlobalCertConfig),
-		CertFile:         strings.TrimSpace(c.CertFile),
-		KeyFile:          strings.TrimSpace(c.KeyFile),
-		AcceptProxyProto: c.AcceptProxyProtocol,
-		startedAt:        time.Now(),
-		AliveMap:         &sspanel.AliveMap{Alive: map[int]int{}},
+		client:             client,
+		APIHost:            c.APIHost,
+		Token:              c.Key,
+		NodeId:             c.NodeID,
+		NodeTypeRaw:        rawNodeType,
+		NodeType:           nodeType,
+		NodeTypeHeader:     headerType,
+		ListenIP:           c.ListenIP,
+		SSObfsUDP:          c.SSObfsUDP,
+		EnableFallback:     c.EnableFallback,
+		FallbackObject:     cloneConfigFallbackObject(c.FallbackObject),
+		CertConfig:         cloneCertConfig(c.CertConfig),
+		GlobalCertConfig:   cloneCertConfig(c.GlobalCertConfig),
+		CertFile:           strings.TrimSpace(c.CertFile),
+		KeyFile:            strings.TrimSpace(c.KeyFile),
+		AcceptProxyProto:   c.AcceptProxyProtocol,
+		xrayRulesCachePath: buildXrayRulesCachePath(c.APIHost, c.NodeID, headerType),
+		startedAt:          time.Now(),
+		AliveMap:           &sspanel.AliveMap{Alive: map[int]int{}},
 	}, nil
 }
 
