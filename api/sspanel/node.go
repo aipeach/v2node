@@ -381,6 +381,9 @@ func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route
 			NodeReportMinTraffic:   0,
 		},
 	}
+	if protocol == "vless" {
+		common.Flow = strings.TrimSpace(endpoint.ExtraParams["flow"])
+	}
 
 	if protocol == "vless" && client.EnableFallback {
 		fb, err := buildNodeFallbackObject(client.FallbackObject)
@@ -401,7 +404,15 @@ func buildModMUVmessNodeInfo(client *Client, data *modMUNodeData, routes []Route
 		Common:       common,
 	}
 
-	if endpoint.SecurityMode == "tls" {
+	switch resolveVMessSecurityMode(endpoint) {
+	case "reality":
+		if protocol != "vless" {
+			return nil, fmt.Errorf("security reality is not supported for protocol %s", protocol)
+		}
+		if err := applyModMUReality(common, node, endpoint); err != nil {
+			return nil, err
+		}
+	case "tls":
 		certInfo := resolveCertInfo(endpoint, client, common.Protocol, nodeID)
 		common.Tls = Tls
 		common.TlsSettings = TlsSettings{
@@ -781,9 +792,118 @@ func parseVMessEndpoint(server string) (*vmessEndpoint, error) {
 		SecurityMode: securityMode,
 		Path:         strings.TrimSpace(params["path"]),
 		Host:         strings.TrimSpace(params["host"]),
-		ServerName:   strings.TrimSpace(params["server"]),
+		ServerName:   firstNonEmpty(params["server"], params["sni"], params["servername"], params["server_name"]),
 		ExtraParams:  params,
 	}, nil
+}
+
+func resolveVMessSecurityMode(endpoint *vmessEndpoint) string {
+	if endpoint == nil {
+		return ""
+	}
+	mode := strings.ToLower(strings.TrimSpace(endpoint.ExtraParams["security"]))
+	if mode == "" {
+		mode = strings.ToLower(strings.TrimSpace(endpoint.SecurityMode))
+	}
+	switch mode {
+	case "none", "plain":
+		return ""
+	case "xtls":
+		return "tls"
+	default:
+		return mode
+	}
+}
+
+func applyModMUReality(common *CommonNode, node *NodeInfo, endpoint *vmessEndpoint) error {
+	if common == nil || node == nil || endpoint == nil {
+		return fmt.Errorf("invalid vless reality settings")
+	}
+	params := endpoint.ExtraParams
+	serverName := firstNonEmpty(params["sni"], params["server_name"], params["servername"], endpoint.ServerName)
+	destHost, destPort := splitDest(firstNonEmpty(params["target"], params["dest"]))
+	if destPort == "" {
+		destPort = "443"
+	}
+	if destHost == "" {
+		destHost = serverName
+	}
+	if serverName == "" {
+		serverName = destHost
+	}
+	privateKey := firstNonEmpty(params["privatekey"], params["private_key"])
+	if privateKey == "" {
+		return fmt.Errorf("vless reality private key is empty")
+	}
+	if destHost == "" {
+		return fmt.Errorf("vless reality target is empty")
+	}
+	shortIDs := parseRealityShortIDs(params)
+	shortID := ""
+	if len(shortIDs) > 0 {
+		shortID = shortIDs[0]
+	}
+	xver := uint64(0)
+	if rawXver := strings.TrimSpace(params["xver"]); rawXver != "" {
+		value, err := strconv.ParseUint(rawXver, 10, 64)
+		if err != nil {
+			return fmt.Errorf("invalid vless reality xver: %s", rawXver)
+		}
+		xver = value
+	}
+
+	common.Tls = Reality
+	common.TlsSettings = TlsSettings{
+		ServerName:       serverName,
+		Dest:             destHost,
+		ServerPort:       destPort,
+		ShortId:          shortID,
+		ShortIds:         shortIDs,
+		PrivateKey:       privateKey,
+		Mldsa65Seed:      firstNonEmpty(params["mldsa65seed"], params["mldsa65_seed"]),
+		Xver:             xver,
+		RejectUnknownSni: "0",
+	}
+	node.Security = Reality
+	return nil
+}
+
+func parseRealityShortIDs(params map[string]string) []string {
+	if len(params) == 0 {
+		return nil
+	}
+	segments := []string{
+		params["shortids"],
+		params["short_ids"],
+		params["sid"],
+		params["shortid"],
+		params["short_id"],
+	}
+	shortIDs := make([]string, 0, len(segments))
+	seen := make(map[string]struct{}, len(segments))
+	for _, raw := range segments {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		for _, token := range strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == ';' || r == '|' || r == ' ' || r == '\t'
+		}) {
+			shortID := strings.TrimSpace(token)
+			if shortID == "" {
+				continue
+			}
+			if _, ok := seen[shortID]; ok {
+				continue
+			}
+			seen[shortID] = struct{}{}
+			shortIDs = append(shortIDs, shortID)
+		}
+	}
+	if len(shortIDs) == 0 {
+		return nil
+	}
+	return shortIDs
 }
 
 func parseTrojanEndpoint(server string) (*trojanEndpoint, error) {
@@ -1007,6 +1127,18 @@ func normalizePath(path string) string {
 		return path
 	}
 	return "/" + path
+}
+
+func splitDest(dest string) (string, string) {
+	dest = strings.TrimSpace(dest)
+	if dest == "" {
+		return "", ""
+	}
+	host, port, found := strings.Cut(dest, ":")
+	if !found {
+		return dest, ""
+	}
+	return strings.TrimSpace(host), strings.TrimSpace(port)
 }
 
 func chooseCertDomain(endpoint *vmessEndpoint) string {
